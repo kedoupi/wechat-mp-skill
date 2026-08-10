@@ -1,0 +1,10 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "groupings": [
+    {
+      "title": "General",
+      "description": "Describe the skill category.",
+      "skills": ["wechat-mp"]
+    }
+  ]
+}
