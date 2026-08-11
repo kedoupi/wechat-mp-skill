@@ -15,6 +15,7 @@ import argparse
 import html as html_lib
 import json
 import mimetypes
+import os
 import re
 import sys
 import time
@@ -23,7 +24,20 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-API_BASE = "https://api.weixin.qq.com"
+# Default WeChat API host. Override when IP whitelist requires a proxy:
+#   export WECHAT_MP_API_BASE=https://your-proxy.example
+#   # or suite default:
+#   export KDP_WECHAT_PROXY=https://your-proxy.example
+def _api_base() -> str:
+    raw = (
+        os.environ.get("WECHAT_MP_API_BASE")
+        or os.environ.get("KDP_WECHAT_PROXY")
+        or "https://api.weixin.qq.com"
+    ).strip().rstrip("/")
+    return raw or "https://api.weixin.qq.com"
+
+
+API_BASE = _api_base()  # evaluated at import; re-read via _api_base() in callers if needed
 TIMEOUT = 30
 
 # Simple process-local token cache: appid → (token, expires_at)
@@ -49,6 +63,11 @@ def _http_json(
     headers: dict[str, str] | None = None,
 ) -> dict:
     req = urllib.request.Request(url, data=data, method=method)
+    # Cloudflare / some proxies block the default Python-urllib User-Agent.
+    req.add_header(
+        "User-Agent",
+        "wechat-mp/0.1 (+https://github.com/kedoupi/wechat-mp-skill)",
+    )
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
@@ -83,7 +102,7 @@ def get_access_token(appid: str, secret: str, *, force: bool = False) -> str:
             "secret": secret,
         }
     )
-    data = _http_json("GET", f"{API_BASE}/cgi-bin/token?{qs}")
+    data = _http_json("GET", f"{_api_base()}/cgi-bin/token?{qs}")
     if "access_token" not in data:
         err = data.get("errcode", "?")
         msg = data.get("errmsg", "unknown")
@@ -113,7 +132,7 @@ def upload_image(access_token: str, image_path: str) -> str:
             f"\r\n--{boundary}--\r\n".encode(),
         ]
     )
-    url = f"{API_BASE}/cgi-bin/media/uploadimg?access_token={urllib.parse.quote(access_token)}"
+    url = f"{_api_base()}/cgi-bin/media/uploadimg?access_token={urllib.parse.quote(access_token)}"
     data = _http_json(
         "POST",
         url,
@@ -147,7 +166,7 @@ def upload_thumb(access_token: str, image_path: str) -> str:
         ]
     )
     qs = urllib.parse.urlencode({"access_token": access_token, "type": "image"})
-    url = f"{API_BASE}/cgi-bin/material/add_material?{qs}"
+    url = f"{_api_base()}/cgi-bin/material/add_material?{qs}"
     data = _http_json(
         "POST",
         url,
@@ -253,7 +272,7 @@ def create_draft(
     payload = {"articles": [article]}
     # ensure_ascii=False is mandatory for Chinese titles/content
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    url = f"{API_BASE}/cgi-bin/draft/add?access_token={urllib.parse.quote(access_token)}"
+    url = f"{_api_base()}/cgi-bin/draft/add?access_token={urllib.parse.quote(access_token)}"
     data = _http_json(
         "POST",
         url,

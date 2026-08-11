@@ -60,7 +60,7 @@ PASS=$((PASS + 1))
 
 echo "== version / help =="
 ver="$("$BIN" version)"
-assert_contains "version" "wechat-mp v0.1.1" "$ver"
+assert_contains "version" "wechat-mp v0.1.2" "$ver"
 "$BIN" --help >"$TMP/help"
 assert_contains "help draft" "draft" "$(cat "$TMP/help")"
 assert_contains "help dry-run" "dry-run" "$(cat "$TMP/help")"
@@ -184,12 +184,15 @@ assert_contains "token dry-run" "[dry-run]" "$tokerr"
 
 echo "== draft guards (offline, no network) =="
 # missing cover → exit 2 (non-dry-run)
+# Unset skill + suite alias env so local shell globals cannot satisfy creds
+_unset_creds=(env -u WECHAT_MP_APPID -u WECHAT_MP_SECRET -u WECHAT_MP_CONFIG \
+  -u KDP_WECHAT_APPID -u KDP_WECHAT_APPSECRET -u KDP_WECHAT_PROXY -u WECHAT_MP_API_BASE)
 rm -f "$out_dir/cover.png"
-assert_exit "draft no cover" 2 env -u WECHAT_MP_APPID -u WECHAT_MP_SECRET \
+assert_exit "draft no cover" 2 "${_unset_creds[@]}" \
   "$BIN" draft --dir "$out_dir"
 : >"$out_dir/cover.png"
 # credentials missing → exit 2 before network
-assert_exit "draft no credentials" 2 env -u WECHAT_MP_APPID -u WECHAT_MP_SECRET \
+assert_exit "draft no credentials" 2 "${_unset_creds[@]}" \
   "$BIN" draft --dir "$out_dir"
 
 echo "== empty option rejected =="
@@ -217,6 +220,12 @@ suite="$("$BIN" suite 2>&1)"
 assert_contains "suite header" "suite visibility" "$suite"
 assert_contains "suite tzai line" "tzai-image" "$suite"
 assert_contains "suite lark line" "lark-push" "$suite"
+
+
+echo "== api base / alias offline =="
+# list-local-images stays offline; _api_base only reads env
+base="$(WECHAT_MP_API_BASE=https://proxy.example python3 -c "import importlib.util; from pathlib import Path; p=Path('$API'); spec=importlib.util.spec_from_file_location('w', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m._api_base())")"
+assert_contains "api base env" "proxy.example" "$base"
 
 echo "== package layout =="
 for f in \

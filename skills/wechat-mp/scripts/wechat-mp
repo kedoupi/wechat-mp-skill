@@ -70,6 +70,20 @@ load_all_configs() {
   if [[ -n "${WECHAT_MP_CONFIG:-}" ]]; then
     load_env_file "$WECHAT_MP_CONFIG"
   fi
+  # Soft aliases from suite global env (do not override explicit WECHAT_MP_*)
+  if [[ -z "${WECHAT_MP_APPID:-}" && -n "${KDP_WECHAT_APPID:-}" ]]; then
+    WECHAT_MP_APPID="$KDP_WECHAT_APPID"
+  fi
+  if [[ -z "${WECHAT_MP_SECRET:-}" && -n "${KDP_WECHAT_APPSECRET:-}" ]]; then
+    WECHAT_MP_SECRET="$KDP_WECHAT_APPSECRET"
+  fi
+  # API host: WECHAT_MP_API_BASE or KDP_WECHAT_PROXY (IP whitelist proxy)
+  if [[ -z "${WECHAT_MP_API_BASE:-}" && -n "${KDP_WECHAT_PROXY:-}" ]]; then
+    WECHAT_MP_API_BASE="$KDP_WECHAT_PROXY"
+  fi
+  if [[ -n "${WECHAT_MP_API_BASE:-}" ]]; then
+    export WECHAT_MP_API_BASE
+  fi
 }
 
 print_config_paths() {
@@ -199,7 +213,14 @@ cmd_doctor() {
     pass "WECHAT_MP_APPID set (${WECHAT_MP_APPID:0:4}…${WECHAT_MP_APPID: -4})"
     pass "WECHAT_MP_SECRET set (masked)"
   else
-    soft "appid/secret not set — writing + preview still work; draft needs: wechat-mp init --appid … --secret …"
+    soft "appid/secret not set — writing + preview still work; draft needs: wechat-mp init --appid … --secret … (or export KDP_WECHAT_APPID/APPSECRET)"
+  fi
+  if [[ -n "${WECHAT_MP_API_BASE:-}" ]]; then
+    pass "API base override: ${WECHAT_MP_API_BASE}"
+  elif [[ -n "${KDP_WECHAT_PROXY:-}" ]]; then
+    pass "API base via KDP_WECHAT_PROXY: ${KDP_WECHAT_PROXY}"
+  else
+    soft "API base default api.weixin.qq.com (set WECHAT_MP_API_BASE or KDP_WECHAT_PROXY if IP whitelist blocks you)"
   fi
   if [[ -f "$DURABLE_STYLE_FILE" || -f "$GLOBAL_SHARED_STYLE_FILE" ]]; then
     pass "style.yaml found (account voice)"
@@ -800,6 +821,7 @@ cmd_which_config() {
     echo "  WECHAT_MP_SECRET=(unset)"
   fi
   echo "  WECHAT_MP_AUTHOR=${WECHAT_MP_AUTHOR:-"(unset)"}"
+  echo "  WECHAT_MP_API_BASE=${WECHAT_MP_API_BASE:-${KDP_WECHAT_PROXY:-"(default https://api.weixin.qq.com)"}}"
 }
 
 # ---------------------------------------------------------------------------

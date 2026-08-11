@@ -10,7 +10,7 @@ description: >
   chat messages (use lark-push), Xiaohongshu posts, generic blogs without 公众号 intent.
 metadata:
   author: kedoupi
-  version: "0.1.1"
+  version: "0.1.2"
   requires:
     bins: ["python3"]
 ---
