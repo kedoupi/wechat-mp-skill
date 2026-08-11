@@ -2,8 +2,8 @@
   "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
   "groupings": [
     {
-      "title": "General",
-      "description": "Describe the skill category.",
+      "title": "WeChat / Content",
+      "description": "WeChat Official Account writing, preview, and optional draft push.",
       "skills": ["wechat-mp"]
     }
   ]

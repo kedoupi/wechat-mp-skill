@@ -1,36 +1,32 @@
 #!/usr/bin/env bash
+# wechat-mp — WeChat Official Account content + optional draft helper
 set -euo pipefail
 
-# Resolve skill root even when reached via agent symlink.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SKILL_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 SKILL_NAME="$(basename -- "$SKILL_ROOT")"
 SKILLS_PARENT="$(dirname -- "$SKILL_ROOT")"
+LIB_DIR="${SCRIPT_DIR}/lib"
+MD2HTML_PY="${LIB_DIR}/md2html.py"
+WECHAT_API_PY="${LIB_DIR}/wechat_api.py"
 
-# Durable config lives next to the skill package, not inside it.
 DURABLE_CONFIG_DIR="${SKILLS_PARENT}/.skill-data/${SKILL_NAME}"
 DURABLE_CONFIG_FILE="${DURABLE_CONFIG_DIR}/config.env"
+# Style lives next to durable config (writing; no appid required)
+DURABLE_STYLE_FILE="${DURABLE_CONFIG_DIR}/style.yaml"
 
-# Shared fallback for copy-mode multi-agent installs.
 GLOBAL_SHARED_CONFIG_FILE="${HOME}/.agents/skills/.skill-data/${SKILL_NAME}/config.env"
-
-# Optional in-package override (wiped by npx skills update).
+GLOBAL_SHARED_STYLE_FILE="${HOME}/.agents/skills/.skill-data/${SKILL_NAME}/style.yaml"
 LOCAL_CONFIG_FILE="${SKILL_ROOT}/config.local.env"
-
-# Legacy XDG path.
 XDG_CONFIG_FILE="${HOME}/.config/${SKILL_NAME}/config.env"
-
 EXAMPLE_CONFIG_FILE="${SKILL_ROOT}/config.example.env"
+EXAMPLE_STYLE_FILE="${SKILL_ROOT}/templates/style.example.yaml"
 SKILL_MD_FILE="${SKILL_ROOT}/SKILL.md"
-
-# Env names use SKILL_* in the template; scripts/new-skill.sh rewrites them
-# to <NAME>_CHAT_ID / <NAME>_AS / <NAME>_FOOTER / <NAME>_CONFIG.
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Require a non-empty option value. Values MAY start with "-" (markdown lists).
 require_val() {
   local opt="$1"
   if [[ $# -lt 2 ]]; then
@@ -81,6 +77,7 @@ print_config_paths() {
 Skill root:           ${SKILL_ROOT}
 Version:              $(skill_version)
 Durable config:       ${DURABLE_CONFIG_FILE}$([[ -f "$DURABLE_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
+Durable style:        ${DURABLE_STYLE_FILE}$([[ -f "$DURABLE_STYLE_FILE" ]] && echo "  [exists]" || echo "  [missing]")
 Global shared config: ${GLOBAL_SHARED_CONFIG_FILE}$([[ -f "$GLOBAL_SHARED_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
 Local (in skill):     ${LOCAL_CONFIG_FILE}$([[ -f "$LOCAL_CONFIG_FILE" ]] && echo "  [exists · wiped on skills update]" || echo "  [missing]")
 XDG legacy:           ${XDG_CONFIG_FILE}$([[ -f "$XDG_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
@@ -88,34 +85,178 @@ Explicit override:    ${WECHAT_MP_CONFIG:-"(unset)"}
 EOF
 }
 
+require_python3() {
+  if command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  cat <<'EOF' >&2
+Error: python3 is required (md2html / WeChat API helpers).
+
+  # macOS
+  brew install python3
+EOF
+  exit 127
+}
+
+find_peer_script() {
+  # find_peer_script <skill-name> <relative-script>
+  local peer="$1"
+  local rel="$2"
+  local c
+  for c in \
+    "${HOME}/.agents/skills/${peer}/${rel}" \
+    "${HOME}/.claude/skills/${peer}/${rel}" \
+    "${HOME}/.codex/skills/${peer}/${rel}" \
+    "${HOME}/.grok/skills/${peer}/${rel}" \
+    "${HOME}/.cursor/skills/${peer}/${rel}"
+  do
+    if [[ -x "$c" ]]; then
+      printf '%s' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+slugify() {
+  # ascii slug; empty → article
+  local s="$1"
+  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+  if [[ -z "$s" ]]; then
+    s="article-$(date +%Y%m%d-%H%M%S)"
+  fi
+  printf '%s' "$s"
+}
+
+usage() {
+  cat <<EOF
+wechat-mp v$(skill_version) — WeChat Official Account writing + optional draft
+
+Usage:
+  wechat-mp <command> [options]
+
+Commands:
+  doctor              Environment + suite visibility checklist
+  init                Write durable WeChat credentials (optional for writing)
+  init-style          Copy style template to durable style.yaml
+  new-out             Create output dir + manifest.json
+  preview             Markdown → local WeChat-oriented HTML
+  md2html             Convert MD to HTML (stdout or -o)
+  draft               Push draft to WeChat (needs appid; use --dry-run offline)
+  upload-image        Upload body image → WeChat CDN url
+  upload-thumb        Upload cover → media_id
+  token               Fetch access_token (debug)
+  suite               Report soft peers (tzai-image / lark-push)
+  config-path|paths   Show config locations
+  which-config        Show effective WeChat config (masked)
+  version             Print version
+
+Writing quality flow lives in SKILL.md (Agent). This CLI is the deterministic layer.
+
+Safety:
+  --dry-run on draft/upload/token never hits the network.
+  draft requires an explicit run (user/agent approval). No mass-send.
+
+Docs: https://github.com/kedoupi/wechat-mp-skill
+EOF
+}
+
 # ---------------------------------------------------------------------------
-# init
+# doctor
+# ---------------------------------------------------------------------------
+
+cmd_doctor() {
+  local fail=0 warn=0
+  pass() { echo "  [ok]   $1"; }
+  soft() { echo "  [warn] $1"; warn=$((warn + 1)); }
+  hard() { echo "  [FAIL] $1"; fail=$((fail + 1)); }
+
+  echo "wechat-mp doctor  v$(skill_version)"
+  echo "Skill root: ${SKILL_ROOT}"
+  echo
+
+  echo "== Runtime =="
+  if command -v python3 >/dev/null 2>&1; then
+    pass "python3  $(python3 --version 2>/dev/null | tr -d '\n')"
+  else
+    hard "python3 not found (required for preview / draft helpers)"
+  fi
+  if [[ -f "$MD2HTML_PY" ]]; then
+    pass "md2html.py present"
+  else
+    hard "missing ${MD2HTML_PY}"
+  fi
+  if [[ -f "$WECHAT_API_PY" ]]; then
+    pass "wechat_api.py present"
+  else
+    hard "missing ${WECHAT_API_PY}"
+  fi
+
+  echo
+  echo "== Config (WeChat API — optional for writing) =="
+  load_all_configs
+  if [[ -n "${WECHAT_MP_APPID:-}" && -n "${WECHAT_MP_SECRET:-}" ]]; then
+    pass "WECHAT_MP_APPID set (${WECHAT_MP_APPID:0:4}…${WECHAT_MP_APPID: -4})"
+    pass "WECHAT_MP_SECRET set (masked)"
+  else
+    soft "appid/secret not set — writing + preview still work; draft needs: wechat-mp init --appid … --secret …"
+  fi
+  if [[ -f "$DURABLE_STYLE_FILE" || -f "$GLOBAL_SHARED_STYLE_FILE" ]]; then
+    pass "style.yaml found (account voice)"
+  else
+    soft "no style.yaml — using default voice (init-style optional)"
+  fi
+
+  echo
+  echo "== Suite visibility (soft peers; not required) =="
+  local tzai lark
+  if tzai="$(find_peer_script tzai-image scripts/tzai-image 2>/dev/null)"; then
+    pass "tzai-image  $tzai"
+  else
+    soft "tzai-image not found — cover gen: npx skills add kedoupi/tzai-image-skill -g --all"
+  fi
+  if lark="$(find_peer_script lark-push scripts/lark-push 2>/dev/null)"; then
+    pass "lark-push   $lark"
+  else
+    soft "lark-push not found — notify: npx skills add kedoupi/lark-push-skill"
+  fi
+
+  echo
+  if [[ "$fail" -gt 0 ]]; then
+    echo "Result: FAIL ($fail required, $warn warnings)"
+    return 1
+  fi
+  echo "Result: OK ($warn warnings) — writing works without WeChat credentials"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# init / init-style
 # ---------------------------------------------------------------------------
 
 cmd_init() {
-  local chat_id=""
-  local as_identity="bot"
-  local footer="via ${SKILL_NAME}"
-  local force=0
-  local target="durable"
+  local appid="" secret="" author="" force=0 target="durable"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --chat-id) require_val "$1" "${2-}"; chat_id="$2"; shift 2 ;;
-      --as) require_val "$1" "${2-}"; as_identity="$2"; shift 2 ;;
-      --footer) require_val "$1" "${2-}"; footer="$2"; shift 2 ;;
+      --appid) require_val "$1" "${2-}"; appid="$2"; shift 2 ;;
+      --secret) require_val "$1" "${2-}"; secret="$2"; shift 2 ;;
+      --author) require_val "$1" "${2-}"; author="$2"; shift 2 ;;
       --target) require_val "$1" "${2-}"; target="$2"; shift 2 ;;
       --force) force=1; shift ;;
       -h|--help)
         cat <<EOF
-Usage: ${SKILL_NAME} init [options]
+Usage: wechat-mp init --appid <id> --secret <secret> [options]
+
+Write WeChat Official Account credentials (only needed for draft/upload).
+Writing / preview do NOT require this.
 
 Options:
-  --chat-id <id>   Target chat id
-  --as <bot|user>  Sending identity (default: bot)
-  --footer <text>  Message footer (may start with '-')
-  --target <where> durable | global | local (default: durable)
-  --force          Overwrite existing config
+  --appid <id>
+  --secret <secret>
+  --author <name>     Default author on drafts
+  --target durable|global|local   (default: durable)
+  --force
 EOF
         return 0
         ;;
@@ -123,9 +264,10 @@ EOF
     esac
   done
 
-  case "$as_identity" in bot|user) ;; *)
-    echo "Invalid --as: $as_identity" >&2; return 2 ;;
-  esac
+  if [[ -z "$appid" || -z "$secret" ]]; then
+    echo "Missing --appid and/or --secret" >&2
+    return 2
+  fi
 
   local out_file
   case "$target" in
@@ -135,15 +277,6 @@ EOF
     *) echo "Invalid --target: $target" >&2; return 2 ;;
   esac
 
-  if [[ -z "$chat_id" && -t 0 ]]; then
-    printf "Chat id: "
-    read -r chat_id
-  fi
-  if [[ -z "$chat_id" ]]; then
-    echo "Missing chat id. Pass --chat-id <id>" >&2
-    return 2
-  fi
-
   if [[ -f "$out_file" && "$force" -ne 1 ]]; then
     echo "Config already exists: $out_file" >&2
     echo "Re-run with --force to overwrite." >&2
@@ -152,12 +285,12 @@ EOF
 
   mkdir -p "$(dirname -- "$out_file")"
   cat >"$out_file" <<EOF
-# Generated by: ${SKILL_NAME} init
+# Generated by: wechat-mp init
 # Skill root: ${SKILL_ROOT}
 # Target: ${target}
-WECHAT_MP_CHAT_ID=$(printf '%q' "$chat_id")
-WECHAT_MP_AS=$(printf '%q' "$as_identity")
-WECHAT_MP_FOOTER=$(printf '%q' "$footer")
+WECHAT_MP_APPID=$(printf '%q' "$appid")
+WECHAT_MP_SECRET=$(printf '%q' "$secret")
+WECHAT_MP_AUTHOR=$(printf '%q' "$author")
 EOF
   chmod 600 "$out_file" 2>/dev/null || true
   echo "Wrote ${out_file}"
@@ -168,105 +301,541 @@ EOF
   fi
 }
 
-# ---------------------------------------------------------------------------
-# send (customize this)
-# ---------------------------------------------------------------------------
-
-cmd_send() {
-  local title="" body="" dry_run=0
-
+cmd_init_style() {
+  local force=0 target="durable"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --title) require_val "$1" "${2-}"; title="$2"; shift 2 ;;
-      --body) require_val "$1" "${2-}"; body="$2"; shift 2 ;;
-      --dry-run) dry_run=1; shift ;;
+      --force) force=1; shift ;;
+      --target) require_val "$1" "${2-}"; target="$2"; shift 2 ;;
       -h|--help)
-        cat <<EOF
-Usage: ${SKILL_NAME} [options]
-
-Options:
-  --title <text>
-  --body <text>     May start with '-' (markdown lists OK)
-  --dry-run         Local preview only (no side effects)
-  --version
-EOF
+        echo "Usage: wechat-mp init-style [--target durable|global] [--force]"
         return 0
         ;;
-      --version)
-        echo "${SKILL_NAME} v$(skill_version)"
+      *) echo "Unknown option: $1" >&2; return 2 ;;
+    esac
+  done
+  local out
+  case "$target" in
+    durable) out="$DURABLE_STYLE_FILE" ;;
+    global) out="$GLOBAL_SHARED_STYLE_FILE" ;;
+    *) echo "Invalid --target (style: durable|global)" >&2; return 2 ;;
+  esac
+  if [[ -f "$out" && "$force" -ne 1 ]]; then
+    echo "Style already exists: $out" >&2
+    return 1
+  fi
+  if [[ ! -f "$EXAMPLE_STYLE_FILE" ]]; then
+    echo "Missing template: $EXAMPLE_STYLE_FILE" >&2
+    return 1
+  fi
+  mkdir -p "$(dirname -- "$out")"
+  cp "$EXAMPLE_STYLE_FILE" "$out"
+  chmod 600 "$out" 2>/dev/null || true
+  echo "Wrote $out — edit topics / voice / taboo for your account"
+}
+
+# ---------------------------------------------------------------------------
+# new-out + manifest
+# ---------------------------------------------------------------------------
+
+cmd_new_out() {
+  local slug="" title="" base="./wechat-mp-out"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --slug) require_val "$1" "${2-}"; slug="$2"; shift 2 ;;
+      --title) require_val "$1" "${2-}"; title="$2"; shift 2 ;;
+      --base) require_val "$1" "${2-}"; base="$2"; shift 2 ;;
+      -h|--help)
+        cat <<EOF
+Usage: wechat-mp new-out [--slug <slug>] [--title <title>] [--base <dir>]
+
+Create output directory with manifest.json for suite handoff.
+Default base: ./wechat-mp-out
+EOF
         return 0
         ;;
       *) echo "Unknown option: $1" >&2; return 2 ;;
     esac
   done
 
-  local chat_id="${WECHAT_MP_CHAT_ID:-}"
-  local as_identity="${WECHAT_MP_AS:-bot}"
-  local footer="${WECHAT_MP_FOOTER:-via ${SKILL_NAME}}"
+  if [[ -z "$slug" ]]; then
+    if [[ -n "$title" ]]; then
+      slug="$(slugify "$title")"
+    else
+      slug="article-$(date +%Y%m%d-%H%M%S)"
+    fi
+  else
+    slug="$(slugify "$slug")"
+  fi
 
-  if [[ -z "$chat_id" ]]; then
-    echo "Missing chat id. Run: bash $0 init --chat-id <id>" >&2
-    print_config_paths >&2
+  local dir="${base%/}/${slug}"
+  mkdir -p "$dir/figures"
+  local ver
+  ver="$(skill_version)"
+  # shellcheck disable=SC2016
+  require_python3
+  WECHAT_MP_NEW_OUT_DIR="$dir" WECHAT_MP_NEW_OUT_SLUG="$slug" \
+  WECHAT_MP_NEW_OUT_TITLE="$title" WECHAT_MP_NEW_OUT_VER="$ver" \
+  python3 - <<'PY'
+import json, os
+from pathlib import Path
+d = Path(os.environ["WECHAT_MP_NEW_OUT_DIR"])
+manifest = {
+    "skill": "wechat-mp",
+    "version": os.environ.get("WECHAT_MP_NEW_OUT_VER", "0.0.0"),
+    "slug": os.environ["WECHAT_MP_NEW_OUT_SLUG"],
+    "title": os.environ.get("WECHAT_MP_NEW_OUT_TITLE") or "",
+    "paths": {
+        "article": "article.md",
+        "brief": "brief.md",
+        "cover": "cover.png",
+        "preview": "preview.html",
+        "figures": [],
+        "manifest": "manifest.json",
+    },
+    "status": {
+        "article": "pending",
+        "visual": "pending",
+        "preview": "pending",
+        "draft": "skipped",
+        "notify": "skipped",
+    },
+    "draft_media_id": None,
+}
+(d / "manifest.json").write_text(
+    json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+)
+print(d)
+PY
+}
+
+cmd_manifest_set() {
+  # wechat-mp manifest-set --dir <out> --status article=done [--title ...] [--draft-media-id ...]
+  local dir="" title="" media=""
+  local -a status_pairs=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir) require_val "$1" "${2-}"; dir="$2"; shift 2 ;;
+      --title) require_val "$1" "${2-}"; title="$2"; shift 2 ;;
+      --draft-media-id) require_val "$1" "${2-}"; media="$2"; shift 2 ;;
+      --status) require_val "$1" "${2-}"; status_pairs+=("$2"); shift 2 ;;
+      -h|--help)
+        echo "Usage: wechat-mp manifest-set --dir <out> [--status key=val]... [--title t] [--draft-media-id id]"
+        return 0
+        ;;
+      *) echo "Unknown option: $1" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$dir" || ! -d "$dir" ]]; then
+    echo "Missing or invalid --dir" >&2
     return 2
+  fi
+  require_python3
+  WECHAT_MP_MS_DIR="$dir" WECHAT_MP_MS_TITLE="$title" WECHAT_MP_MS_MEDIA="$media" \
+  WECHAT_MP_MS_STATUS="$(printf '%s\n' "${status_pairs[@]-}")" \
+  python3 - <<'PY'
+import json, os
+from pathlib import Path
+d = Path(os.environ["WECHAT_MP_MS_DIR"])
+mf = d / "manifest.json"
+data = json.loads(mf.read_text(encoding="utf-8")) if mf.exists() else {
+    "skill": "wechat-mp", "paths": {}, "status": {}
+}
+title = os.environ.get("WECHAT_MP_MS_TITLE") or ""
+if title:
+    data["title"] = title
+media = os.environ.get("WECHAT_MP_MS_MEDIA") or ""
+if media:
+    data["draft_media_id"] = media
+    data.setdefault("status", {})["draft"] = "done"
+for line in (os.environ.get("WECHAT_MP_MS_STATUS") or "").splitlines():
+    line = line.strip()
+    if not line or "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    data.setdefault("status", {})[k.strip()] = v.strip()
+# refresh figures list from disk
+fig_dir = d / "figures"
+if fig_dir.is_dir():
+    figs = sorted(
+        str(p.relative_to(d))
+        for p in fig_dir.iterdir()
+        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    )
+    data.setdefault("paths", {})["figures"] = figs
+mf.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(mf)
+PY
+}
+
+# ---------------------------------------------------------------------------
+# preview / md2html
+# ---------------------------------------------------------------------------
+
+cmd_md2html() {
+  require_python3
+  exec python3 "$MD2HTML_PY" "$@"
+}
+
+cmd_preview() {
+  local input="" output="" dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from|--input|-i) require_val "$1" "${2-}"; input="$2"; shift 2 ;;
+      --output|-o) require_val "$1" "${2-}"; output="$2"; shift 2 ;;
+      --dir) require_val "$1" "${2-}"; dir="$2"; shift 2 ;;
+      -h|--help)
+        cat <<EOF
+Usage: wechat-mp preview --from <article.md> [-o preview.html]
+       wechat-mp preview --dir <wechat-mp-out/slug>
+
+Converts Markdown to WeChat-oriented HTML (inline styles).
+No network. Preview is for structure checks — not pixel-perfect editor match.
+EOF
+        return 0
+        ;;
+      *)
+        if [[ -z "$input" && -f "$1" ]]; then
+          input="$1"
+          shift
+        else
+          echo "Unknown option: $1" >&2
+          return 2
+        fi
+        ;;
+    esac
+  done
+
+  if [[ -n "$dir" ]]; then
+    input="${dir%/}/article.md"
+    output="${dir%/}/preview.html"
+  fi
+  if [[ -z "$input" || ! -f "$input" ]]; then
+    echo "Missing article markdown. Use --from <file> or --dir <out>" >&2
+    return 2
+  fi
+  if [[ -z "$output" ]]; then
+    output="${input%.md}.preview.html"
+  fi
+
+  require_python3
+  local meta
+  meta="$(mktemp)"
+  python3 "$MD2HTML_PY" "$input" -o "$output" --meta-json "$meta"
+  echo "Wrote $output"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import json;print(json.dumps(json.load(open('$meta')),ensure_ascii=False,indent=2))" 2>/dev/null || true
+  fi
+  rm -f "$meta"
+  if [[ -n "$dir" && -f "${dir%/}/manifest.json" ]]; then
+    cmd_manifest_set --dir "$dir" --status preview=done >/dev/null || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# draft / upload (network unless dry-run)
+# ---------------------------------------------------------------------------
+
+cmd_draft() {
+  local from="" cover="" title="" digest="" author="" dir="" dry_run=0 html_file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from) require_val "$1" "${2-}"; from="$2"; shift 2 ;;
+      --html) require_val "$1" "${2-}"; html_file="$2"; shift 2 ;;
+      --cover) require_val "$1" "${2-}"; cover="$2"; shift 2 ;;
+      --title) require_val "$1" "${2-}"; title="$2"; shift 2 ;;
+      --digest) require_val "$1" "${2-}"; digest="$2"; shift 2 ;;
+      --author) require_val "$1" "${2-}"; author="$2"; shift 2 ;;
+      --dir) require_val "$1" "${2-}"; dir="$2"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help)
+        cat <<EOF
+Usage: wechat-mp draft --from article.md --cover cover.png [options]
+       wechat-mp draft --dir <out> [--dry-run]
+
+Creates a WeChat draft (draft/add). Requires appid/secret via init.
+Cover is mandatory. Does NOT mass-publish.
+
+Options:
+  --from <md>          Source markdown (converted if --html omitted)
+  --html <file>        Prebuilt HTML body
+  --cover <image>      Cover image file (required)
+  --title <text>
+  --digest <text>
+  --author <text>
+  --dir <out>          Use article.md + cover.png + manifest
+  --dry-run            Offline plan only (no network)
+EOF
+        return 0
+        ;;
+      *) echo "Unknown option: $1" >&2; return 2 ;;
+    esac
+  done
+
+  load_all_configs
+  if [[ -n "$dir" ]]; then
+    from="${from:-${dir%/}/article.md}"
+    cover="${cover:-${dir%/}/cover.png}"
+    if [[ -f "${dir%/}/manifest.json" && -z "$title" ]]; then
+      title="$(python3 -c "import json;print(json.load(open('${dir%/}/manifest.json')).get('title',''))" 2>/dev/null || true)"
+    fi
+  fi
+
+  if [[ -z "$cover" ]]; then
+    echo "Cover required (--cover or --dir with cover.png). Refusing draft without cover." >&2
+    return 2
+  fi
+  if [[ ! -f "$cover" && "$dry_run" -eq 0 ]]; then
+    echo "Cover not found: $cover" >&2
+    return 2
+  fi
+
+  local appid="${WECHAT_MP_APPID:-}"
+  local secret="${WECHAT_MP_SECRET:-}"
+  author="${author:-${WECHAT_MP_AUTHOR:-}}"
+
+  # Build HTML
+  local tmp_html=""
+  if [[ -n "$html_file" ]]; then
+    if [[ ! -f "$html_file" ]]; then
+      echo "HTML not found: $html_file" >&2
+      return 2
+    fi
+  else
+    if [[ -z "$from" || ! -f "$from" ]]; then
+      echo "Need --from markdown or --html" >&2
+      return 2
+    fi
+    require_python3
+    tmp_html="$(mktemp)"
+    local meta
+    meta="$(mktemp)"
+    python3 "$MD2HTML_PY" "$from" -o "$tmp_html" --meta-json "$meta"
+    if [[ -z "$title" ]]; then
+      title="$(python3 -c "import json;print(json.load(open('$meta'))['title'])")"
+    fi
+    if [[ -z "$digest" ]]; then
+      digest="$(python3 -c "import json;print(json.load(open('$meta'))['digest'])")"
+    fi
+    html_file="$tmp_html"
+    rm -f "$meta"
   fi
 
   if [[ -z "$title" ]]; then
-    title="Notification"
+    title="Untitled"
   fi
-  if [[ -z "$body" && ! -t 0 ]]; then
-    body="$(cat)"
-  fi
-  if [[ -z "$body" ]]; then
-    echo "Message body is empty. Use --body or stdin." >&2
-    return 2
+
+  # Base dir for resolving relative body-image paths (article dir or md parent)
+  local base_dir=""
+  if [[ -n "$dir" ]]; then
+    base_dir="${dir%/}"
+  elif [[ -n "$from" && -f "$from" ]]; then
+    base_dir="$(cd -- "$(dirname -- "$from")" && pwd -P)"
+  else
+    base_dir="$(cd -- "$(dirname -- "$html_file")" && pwd -P)"
   fi
 
   if [[ "$dry_run" -eq 1 ]]; then
+    local body_imgs=""
+    if [[ -f "$html_file" ]]; then
+      body_imgs="$(
+        python3 "$WECHAT_API_PY" list-local-images \
+          --html-file "$html_file" --base-dir "$base_dir" 2>/dev/null || true
+      )"
+    fi
     cat <<EOF >&2
-[dry-run] ${SKILL_NAME} v$(skill_version)
-[dry-run] chat_id=${chat_id} as=${as_identity}
+[dry-run] wechat-mp draft v$(skill_version)
+[dry-run] no network / no WeChat API calls
+[dry-run] appid=${appid:-"(unset)"}
 [dry-run] title=${title}
-[dry-run] footer=${footer}
-[dry-run] not performing side effects
+[dry-run] digest=${digest:0:60}…
+[dry-run] cover=${cover}
+[dry-run] html_file=${html_file}
+[dry-run] base_dir=${base_dir}
+[dry-run] author=${author:-"(none)"}
+[dry-run] would: upload body images (uploadimg) → upload-thumb → draft/add
 EOF
-    printf '%s\n' "$body"
+    if [[ -n "$body_imgs" ]]; then
+      while IFS= read -r img; do
+        [[ -n "$img" ]] && echo "[dry-run] body_image=${img}" >&2
+      done <<<"$body_imgs"
+    else
+      echo "[dry-run] body_images=(none local)" >&2
+    fi
+    [[ -n "$tmp_html" ]] && rm -f "$tmp_html"
     return 0
   fi
 
-  # --- replace with actual send logic ---
-  echo "[SEND] Replace this with real send command." >&2
-  echo "chat_id=${chat_id} title=${title}" >&2
-  printf '%s\n' "$body"
-  : "${EXAMPLE_CONFIG_FILE}"
+  if [[ -z "$appid" || -z "$secret" ]]; then
+    echo "Missing WECHAT_MP_APPID/SECRET. Run: wechat-mp init --appid … --secret …" >&2
+    [[ -n "$tmp_html" ]] && rm -f "$tmp_html"
+    return 2
+  fi
+  if [[ ! -f "$cover" ]]; then
+    echo "Cover not found: $cover" >&2
+    [[ -n "$tmp_html" ]] && rm -f "$tmp_html"
+    return 2
+  fi
+
+  require_python3
+  echo "Uploading cover…" >&2
+  local thumb
+  thumb="$(python3 "$WECHAT_API_PY" upload-thumb --appid "$appid" --secret "$secret" --file "$cover")"
+  echo "Creating draft (rewriting local body images if any)…" >&2
+  local media_id
+  media_id="$(
+    python3 "$WECHAT_API_PY" draft \
+      --appid "$appid" \
+      --secret "$secret" \
+      --title "$title" \
+      --html-file "$html_file" \
+      --digest "$digest" \
+      --thumb-media-id "$thumb" \
+      --author "$author" \
+      --base-dir "$base_dir"
+  )"
+  [[ -n "$tmp_html" ]] && rm -f "$tmp_html"
+  echo "draft_media_id=${media_id}"
+  if [[ -n "$dir" && -d "$dir" ]]; then
+    cmd_manifest_set --dir "$dir" --title "$title" --draft-media-id "$media_id" --status draft=done >/dev/null || true
+  fi
+}
+
+cmd_upload_image() {
+  local file="" dry_run=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file) require_val "$1" "${2-}"; file="$2"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) echo "Usage: wechat-mp upload-image --file <path> [--dry-run]"; return 0 ;;
+      *) echo "Unknown: $1" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$file" ]]; then echo "Need --file" >&2; return 2; fi
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] would upload-image file=$file" >&2
+    return 0
+  fi
+  load_all_configs
+  require_python3
+  python3 "$WECHAT_API_PY" upload-image \
+    --appid "${WECHAT_MP_APPID:?}" \
+    --secret "${WECHAT_MP_SECRET:?}" \
+    --file "$file"
+}
+
+cmd_upload_thumb() {
+  local file="" dry_run=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file) require_val "$1" "${2-}"; file="$2"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) echo "Usage: wechat-mp upload-thumb --file <path> [--dry-run]"; return 0 ;;
+      *) echo "Unknown: $1" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$file" ]]; then echo "Need --file" >&2; return 2; fi
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] would upload-thumb file=$file" >&2
+    return 0
+  fi
+  load_all_configs
+  require_python3
+  python3 "$WECHAT_API_PY" upload-thumb \
+    --appid "${WECHAT_MP_APPID:?}" \
+    --secret "${WECHAT_MP_SECRET:?}" \
+    --file "$file"
+}
+
+cmd_token() {
+  local dry_run=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) echo "Usage: wechat-mp token [--dry-run]"; return 0 ;;
+      *) echo "Unknown: $1" >&2; return 2 ;;
+    esac
+  done
+  load_all_configs
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "[dry-run] would fetch access_token for appid=${WECHAT_MP_APPID:-unset}" >&2
+    return 0
+  fi
+  require_python3
+  python3 "$WECHAT_API_PY" token \
+    --appid "${WECHAT_MP_APPID:?}" \
+    --secret "${WECHAT_MP_SECRET:?}"
+}
+
+cmd_suite() {
+  echo "wechat-mp suite visibility  v$(skill_version)"
+  local p
+  if p="$(find_peer_script tzai-image scripts/tzai-image 2>/dev/null)"; then
+    echo "tzai-image: $p"
+  else
+    echo "tzai-image: (not found)"
+    echo "  install: npx skills add kedoupi/tzai-image-skill -g --all"
+  fi
+  if p="$(find_peer_script lark-push scripts/lark-push 2>/dev/null)"; then
+    echo "lark-push:  $p"
+  else
+    echo "lark-push:  (not found)"
+    echo "  install: npx skills add kedoupi/lark-push-skill"
+  fi
+}
+
+cmd_which_config() {
+  load_all_configs
+  print_config_paths
+  echo
+  echo "Effective:"
+  if [[ -n "${WECHAT_MP_APPID:-}" ]]; then
+    echo "  WECHAT_MP_APPID=${WECHAT_MP_APPID:0:4}…${WECHAT_MP_APPID: -4}"
+  else
+    echo "  WECHAT_MP_APPID=(unset)"
+  fi
+  if [[ -n "${WECHAT_MP_SECRET:-}" ]]; then
+    echo "  WECHAT_MP_SECRET=****(set)"
+  else
+    echo "  WECHAT_MP_SECRET=(unset)"
+  fi
+  echo "  WECHAT_MP_AUTHOR=${WECHAT_MP_AUTHOR:-"(unset)"}"
 }
 
 # ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
 
-if [[ "${1:-}" == "init" ]]; then
+main() {
+  if [[ $# -lt 1 ]]; then
+    usage
+    exit 0
+  fi
+  local cmd="$1"
   shift
-  cmd_init "$@"
-  exit $?
-fi
-if [[ "${1:-}" == "config-path" || "${1:-}" == "paths" ]]; then
-  print_config_paths
-  exit 0
-fi
-if [[ "${1:-}" == "which-config" ]]; then
-  load_all_configs
-  print_config_paths
-  echo
-  echo "Effective:"
-  echo "  WECHAT_MP_CHAT_ID=${WECHAT_MP_CHAT_ID:-"(unset)"}"
-  echo "  WECHAT_MP_AS=${WECHAT_MP_AS:-bot}"
-  echo "  WECHAT_MP_FOOTER=${WECHAT_MP_FOOTER:-via ${SKILL_NAME}}"
-  exit 0
-fi
-if [[ "${1:-}" == "version" || "${1:-}" == "--version" ]]; then
-  echo "${SKILL_NAME} v$(skill_version)"
-  exit 0
-fi
+  case "$cmd" in
+    -h|--help|help) usage; exit 0 ;;
+    version|--version) echo "wechat-mp v$(skill_version)"; exit 0 ;;
+    doctor) cmd_doctor "$@" ;;
+    init) cmd_init "$@" ;;
+    init-style) cmd_init_style "$@" ;;
+    new-out) cmd_new_out "$@" ;;
+    manifest-set) cmd_manifest_set "$@" ;;
+    preview) cmd_preview "$@" ;;
+    md2html) cmd_md2html "$@" ;;
+    draft) cmd_draft "$@" ;;
+    upload-image) cmd_upload_image "$@" ;;
+    upload-thumb) cmd_upload_thumb "$@" ;;
+    token) cmd_token "$@" ;;
+    suite) cmd_suite "$@" ;;
+    config-path|paths) print_config_paths ;;
+    which-config) cmd_which_config ;;
+    *)
+      echo "Unknown command: $cmd" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
 
-load_all_configs
-cmd_send "$@"
+main "$@"

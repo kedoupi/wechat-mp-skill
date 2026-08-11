@@ -1,0 +1,26 @@
+# Account voice for wechat-mp writing (no WeChat appid required).
+# Install: bash scripts/wechat-mp init-style
+# Durable path: <skills-parent>/.skill-data/wechat-mp/style.yaml
+
+# One-line account positioning
+positioning: "写给关注 AI 工具与工程效率的技术读者"
+
+# Topics you usually cover (选题边界)
+topics:
+  - Agent Skills
+  - 开发者工具
+  - 开源与工程实践
+
+# Default voice (override in conversation if needed)
+voice: clear-judgment  # clear-judgment | warm-practical | sharp-brief
+
+# Hard taboos (agent must not invent around these)
+taboo:
+  - 编造亲历或客户故事
+  - 无来源的精确数据与排名
+  - 保证收益或医疗法律结论
+
+# Optional signature / footer note
+footer_note: ""
+# Optional: ask reader whether to add AI-assist disclosure
+aigc_disclosure: ask  # ask | always | never

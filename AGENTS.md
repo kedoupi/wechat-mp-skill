@@ -1,48 +1,54 @@
-# AGENTS.md
+# AGENTS.md — wechat-mp
 
-Guidance for AI coding agents working on the `wechat-mp` skill.
-
-This skill is scaffolded from the incubator template. Cross-skill conventions live in
-the incubator docs (`schema/skill-repo.md`, root `AGENTS.md`) when working inside the
-local Skills workspace; they are **not** published as part of this skill repo.
-
-When **creating or editing skills inside the incubator**, agents should follow the
-project meta skill `.agents/skills/skill-incubator/` (not shipped in this package).
-
-This file is the **source of truth** for agents in this skill repo. If `CLAUDE.md`
-exists, it should only point here.
+Source of truth for agents editing this product skill.
 
 ## Purpose
 
-[One-line description.]
+WeChat Official Account (**公众号**) skill in the kedoupi suite:
+
+- **Owns:** writing quality rails, output `manifest.json`, MD→WeChat HTML, draft/upload API  
+- **Does not own:** image generation (`tzai-image`), Feishu send (`lark-push`)  
+- **Compose:** soft-detect peers; degrade; never vendor their code  
 
 ## Layout
 
 ```text
-skills/
-  wechat-mp/        # skill package (discovered by skills CLI)
-    SKILL.md           # required skill definition (version source of truth)
-    config.example.env
-    scripts/           # executable helpers
-    templates/         # optional body templates
-tests/
-  run.sh               # offline self-test
+skills/wechat-mp/
+  SKILL.md
+  config.example.env          # WeChat credentials only
+  scripts/wechat-mp           # bash CLI
+  scripts/lib/md2html.py
+  scripts/lib/wechat_api.py
+  references/                 # brief, frameworks, review, compose, constraints
+  templates/                  # article + style.example
+tests/run.sh
 ```
 
-## Editing rules
+## Conventions
 
-- Keep `SKILL.md` under ~500 lines; put long references in separate files.
-- Do not hardcode private credentials or team-specific identifiers.
-- Scripts must resolve their own directory with `pwd -P` so symlink installs work.
-- Minimize runtime dependencies.
-- Bump `metadata.version` in `SKILL.md` when behavior changes.
-- `--dry-run` must stay offline / side-effect free.
-- CLI values may start with `-` (markdown lists).
+- Version SoT: `skills/wechat-mp/SKILL.md` → `metadata.version`  
+- Durable WeChat config: `<skills-parent>/.skill-data/wechat-mp/config.env`  
+- Durable style (no appid): same dir `style.yaml` via `init-style`  
+- `--dry-run` must stay offline  
+- CLI option values may start with `-`  
+- No secrets in the package; no mass-publish APIs  
+- Bump version on behavior change  
 
-## Local validation
+## Suite discipline
+
+1. Single responsibility  
+2. Standalone install must write useful articles  
+3. Composition via paths + `manifest.json`, not hard imports  
+4. Separate keys: `WECHAT_MP_*` / `TZAI_*` / lark config  
+
+## Validation
 
 ```bash
 bash tests/run.sh
 npx skills add ./ --list
-bash skills/wechat-mp/scripts/wechat-mp --help
+bash skills/wechat-mp/scripts/wechat-mp doctor
 ```
+
+## Incubator
+
+When this repo is a submodule of `kedoupi/skills`, also follow parent `AGENTS.md` and update the parent **README catalog** on version/public changes.
