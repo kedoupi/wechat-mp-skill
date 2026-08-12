@@ -82,6 +82,8 @@ bash <skill-dir>/scripts/wechat-mp init-style
 
 1. Read `templates/style.example.yaml` path or durable style if present.  
 2. `wechat-mp new-out --title "…" --base ./wechat-mp-out` → `$OUT`  
+   Use a **content workspace** CWD (or explicit `--base` under the user's writing project).  
+   Do **not** create `wechat-mp-out` inside the `kedoupi/skills` incubator monorepo root.  
 3. Read and apply:
    - `references/article-brief.md` → write `$OUT/brief.md`
    - `references/frameworks.md` → pick one framework
