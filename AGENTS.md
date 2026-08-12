@@ -13,22 +13,32 @@ WeChat Official Account (**公众号**) skill in the kedoupi suite:
 ## Layout
 
 ```text
-skills/wechat-mp/
+skills/wechat-mp/             # installable package
   SKILL.md
-  config.example.env          # WeChat credentials only
-  scripts/wechat-mp           # bash CLI
-  scripts/lib/md2html.py
-  scripts/lib/wechat_api.py
-  references/                 # brief, frameworks, review, compose, constraints
-  templates/                  # article + style.example
-tests/run.sh
+  config.example.env
+  scripts/wechat-mp
+  scripts/lib/
+  references/
+  templates/
+docs/
+  README.md                   # guides + golden-path demo notes
+tests/
+  README.md
+  run.sh
+  fixtures/
+artifacts/                    # optional future skill-repo live dumps (none yet)
 ```
+
+**docs / tests / artifacts:** incubator separation applies.  
+**User articles** live under the content project `wechat-mp-out/`, not in this repo.
 
 ## Conventions
 
 - Version SoT: `skills/wechat-mp/SKILL.md` → `metadata.version`  
-- Durable WeChat config: `<skills-parent>/.skill-data/wechat-mp/config.env`  
-- Durable style (no appid): same dir `style.yaml` via `init-style`  
+- **Config (recommended):** `~/.config/kedoupi/wechat-mp/config.env` (+ `style.yaml`)  
+- Legacy still read / one-shot migrate: `.skill-data/wechat-mp/`, `~/.config/wechat-mp/`  
+- Public keys only: `WECHAT_MP_*` — never edit the user's shell rc for secrets  
+
 - `--dry-run` must stay offline  
 - CLI option values may start with `-`  
 - No secrets in the package; no mass-publish APIs  

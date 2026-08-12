@@ -10,9 +10,14 @@ LIB_DIR="${SCRIPT_DIR}/lib"
 MD2HTML_PY="${LIB_DIR}/md2html.py"
 WECHAT_API_PY="${LIB_DIR}/wechat_api.py"
 
+# Recommended brand+XDG config (open-source default for init)
+KEDOUPI_CONFIG_DIR="${HOME}/.config/kedoupi/${SKILL_NAME}"
+KEDOUPI_CONFIG_FILE="${KEDOUPI_CONFIG_DIR}/config.env"
+KEDOUPI_STYLE_FILE="${KEDOUPI_CONFIG_DIR}/style.yaml"
+
+# Legacy: install-adjacent durable (still read; may migrate once)
 DURABLE_CONFIG_DIR="${SKILLS_PARENT}/.skill-data/${SKILL_NAME}"
 DURABLE_CONFIG_FILE="${DURABLE_CONFIG_DIR}/config.env"
-# Style lives next to durable config (writing; no appid required)
 DURABLE_STYLE_FILE="${DURABLE_CONFIG_DIR}/style.yaml"
 
 GLOBAL_SHARED_CONFIG_FILE="${HOME}/.agents/skills/.skill-data/${SKILL_NAME}/config.env"
@@ -60,27 +65,56 @@ load_env_file() {
   fi
 }
 
+# If recommended kedoupi config is missing, copy once from a legacy config *file*.
+# Never writes into the user's shell profile / global environment.
+ensure_kedoupi_config() {
+  if [[ -f "$KEDOUPI_CONFIG_FILE" ]]; then
+    return 0
+  fi
+  local src
+  for src in \
+    "$DURABLE_CONFIG_FILE" \
+    "$GLOBAL_SHARED_CONFIG_FILE" \
+    "$XDG_CONFIG_FILE"
+  do
+    if [[ -f "$src" && -s "$src" ]]; then
+      mkdir -p "$KEDOUPI_CONFIG_DIR"
+      cp "$src" "$KEDOUPI_CONFIG_FILE"
+      chmod 600 "$KEDOUPI_CONFIG_FILE" 2>/dev/null || true
+      echo "wechat-mp: migrated config → ${KEDOUPI_CONFIG_FILE}" >&2
+      echo "  (from ${src})" >&2
+      break
+    fi
+  done
+  # Style: same one-shot migrate
+  if [[ ! -f "$KEDOUPI_STYLE_FILE" ]]; then
+    for src in "$DURABLE_STYLE_FILE" "$GLOBAL_SHARED_STYLE_FILE"; do
+      if [[ -f "$src" && -s "$src" ]]; then
+        mkdir -p "$KEDOUPI_CONFIG_DIR"
+        cp "$src" "$KEDOUPI_STYLE_FILE"
+        chmod 600 "$KEDOUPI_STYLE_FILE" 2>/dev/null || true
+        echo "wechat-mp: migrated style → ${KEDOUPI_STYLE_FILE}" >&2
+        break
+      fi
+    done
+  fi
+}
+
+# Least-specific → most-specific. Kedoupi recommended wins among stock files.
 load_all_configs() {
+  ensure_kedoupi_config
   load_env_file "$XDG_CONFIG_FILE"
   load_env_file "$GLOBAL_SHARED_CONFIG_FILE"
   if [[ "$DURABLE_CONFIG_FILE" != "$GLOBAL_SHARED_CONFIG_FILE" ]]; then
     load_env_file "$DURABLE_CONFIG_FILE"
   fi
+  load_env_file "$KEDOUPI_CONFIG_FILE"
   load_env_file "$LOCAL_CONFIG_FILE"
   if [[ -n "${WECHAT_MP_CONFIG:-}" ]]; then
     load_env_file "$WECHAT_MP_CONFIG"
   fi
-  # Soft aliases from suite global env (do not override explicit WECHAT_MP_*)
-  if [[ -z "${WECHAT_MP_APPID:-}" && -n "${KDP_WECHAT_APPID:-}" ]]; then
-    WECHAT_MP_APPID="$KDP_WECHAT_APPID"
-  fi
-  if [[ -z "${WECHAT_MP_SECRET:-}" && -n "${KDP_WECHAT_APPSECRET:-}" ]]; then
-    WECHAT_MP_SECRET="$KDP_WECHAT_APPSECRET"
-  fi
-  # API host: WECHAT_MP_API_BASE or KDP_WECHAT_PROXY (IP whitelist proxy)
-  if [[ -z "${WECHAT_MP_API_BASE:-}" && -n "${KDP_WECHAT_PROXY:-}" ]]; then
-    WECHAT_MP_API_BASE="$KDP_WECHAT_PROXY"
-  fi
+  # Process env WECHAT_MP_* (if already set by the user/CI) is already in the
+  # environment; we do not invent private host aliases as the public API.
   if [[ -n "${WECHAT_MP_API_BASE:-}" ]]; then
     export WECHAT_MP_API_BASE
   fi
@@ -90,9 +124,10 @@ print_config_paths() {
   cat <<EOF
 Skill root:           ${SKILL_ROOT}
 Version:              $(skill_version)
-Durable config:       ${DURABLE_CONFIG_FILE}$([[ -f "$DURABLE_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
-Durable style:        ${DURABLE_STYLE_FILE}$([[ -f "$DURABLE_STYLE_FILE" ]] && echo "  [exists]" || echo "  [missing]")
-Global shared config: ${GLOBAL_SHARED_CONFIG_FILE}$([[ -f "$GLOBAL_SHARED_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
+Kedoupi config:       ${KEDOUPI_CONFIG_FILE}$([[ -f "$KEDOUPI_CONFIG_FILE" ]] && echo "  [exists · recommended]" || echo "  [missing · run: wechat-mp init]")
+Kedoupi style:        ${KEDOUPI_STYLE_FILE}$([[ -f "$KEDOUPI_STYLE_FILE" ]] && echo "  [exists]" || echo "  [missing]")
+Legacy durable:       ${DURABLE_CONFIG_FILE}$([[ -f "$DURABLE_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
+Global shared:        ${GLOBAL_SHARED_CONFIG_FILE}$([[ -f "$GLOBAL_SHARED_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
 Local (in skill):     ${LOCAL_CONFIG_FILE}$([[ -f "$LOCAL_CONFIG_FILE" ]] && echo "  [exists · wiped on skills update]" || echo "  [missing]")
 XDG legacy:           ${XDG_CONFIG_FILE}$([[ -f "$XDG_CONFIG_FILE" ]] && echo "  [exists]" || echo "  [missing]")
 Explicit override:    ${WECHAT_MP_CONFIG:-"(unset)"}
@@ -213,20 +248,23 @@ cmd_doctor() {
   echo
   echo "== Config (WeChat API — optional for writing) =="
   load_all_configs
+  if [[ -f "$KEDOUPI_CONFIG_FILE" ]]; then
+    pass "kedoupi config ${KEDOUPI_CONFIG_FILE}"
+  else
+    soft "no ~/.config/kedoupi/wechat-mp/config.env — draft needs: wechat-mp init --appid … --secret …"
+  fi
   if [[ -n "${WECHAT_MP_APPID:-}" && -n "${WECHAT_MP_SECRET:-}" ]]; then
     pass "WECHAT_MP_APPID set (${WECHAT_MP_APPID:0:4}…${WECHAT_MP_APPID: -4})"
     pass "WECHAT_MP_SECRET set (masked)"
   else
-    soft "appid/secret not set — writing + preview still work; draft needs: wechat-mp init --appid … --secret … (or export KDP_WECHAT_APPID/APPSECRET)"
+    soft "appid/secret not set — writing + preview still work; for draft: wechat-mp init"
   fi
   if [[ -n "${WECHAT_MP_API_BASE:-}" ]]; then
-    pass "API base override: ${WECHAT_MP_API_BASE}"
-  elif [[ -n "${KDP_WECHAT_PROXY:-}" ]]; then
-    pass "API base via KDP_WECHAT_PROXY: ${KDP_WECHAT_PROXY}"
+    pass "WECHAT_MP_API_BASE=${WECHAT_MP_API_BASE}"
   else
-    soft "API base default api.weixin.qq.com (set WECHAT_MP_API_BASE or KDP_WECHAT_PROXY if IP whitelist blocks you)"
+    soft "API base default https://api.weixin.qq.com (set WECHAT_MP_API_BASE in config if IP whitelist requires a proxy)"
   fi
-  if [[ -f "$DURABLE_STYLE_FILE" || -f "$GLOBAL_SHARED_STYLE_FILE" ]]; then
+  if [[ -f "$KEDOUPI_STYLE_FILE" || -f "$DURABLE_STYLE_FILE" || -f "$GLOBAL_SHARED_STYLE_FILE" ]]; then
     pass "style.yaml found (account voice)"
   else
     soft "no style.yaml — using default voice (init-style optional)"
@@ -260,13 +298,14 @@ cmd_doctor() {
 # ---------------------------------------------------------------------------
 
 cmd_init() {
-  local appid="" secret="" author="" force=0 target="durable"
+  local appid="" secret="" author="" api_base="" force=0 target="kedoupi"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --appid) require_val "$1" "${2-}"; appid="$2"; shift 2 ;;
       --secret) require_val "$1" "${2-}"; secret="$2"; shift 2 ;;
       --author) require_val "$1" "${2-}"; author="$2"; shift 2 ;;
+      --api-base) require_val "$1" "${2-}"; api_base="$2"; shift 2 ;;
       --target) require_val "$1" "${2-}"; target="$2"; shift 2 ;;
       --force) force=1; shift ;;
       -h|--help)
@@ -276,11 +315,15 @@ Usage: wechat-mp init --appid <id> --secret <secret> [options]
 Write WeChat Official Account credentials (only needed for draft/upload).
 Writing / preview do NOT require this.
 
+Default path (recommended):
+  ~/.config/kedoupi/wechat-mp/config.env
+
 Options:
   --appid <id>
   --secret <secret>
   --author <name>     Default author on drafts
-  --target durable|global|local   (default: durable)
+  --api-base <url>    Optional WeChat API host (IP-whitelist proxy)
+  --target kedoupi|durable|global|local   (default: kedoupi)
   --force
 EOF
         return 0
@@ -296,10 +339,11 @@ EOF
 
   local out_file
   case "$target" in
+    kedoupi|default) out_file="$KEDOUPI_CONFIG_FILE" ;;
     durable) out_file="$DURABLE_CONFIG_FILE" ;;
     global) out_file="$GLOBAL_SHARED_CONFIG_FILE" ;;
     local) out_file="$LOCAL_CONFIG_FILE" ;;
-    *) echo "Invalid --target: $target" >&2; return 2 ;;
+    *) echo "Invalid --target: $target (use kedoupi|durable|global|local)" >&2; return 2 ;;
   esac
 
   if [[ -f "$out_file" && "$force" -ne 1 ]]; then
@@ -309,14 +353,18 @@ EOF
   fi
 
   mkdir -p "$(dirname -- "$out_file")"
-  cat >"$out_file" <<EOF
-# Generated by: wechat-mp init
-# Skill root: ${SKILL_ROOT}
-# Target: ${target}
-WECHAT_MP_APPID=$(printf '%q' "$appid")
-WECHAT_MP_SECRET=$(printf '%q' "$secret")
-WECHAT_MP_AUTHOR=$(printf '%q' "$author")
-EOF
+  {
+    echo "# Generated by: wechat-mp init"
+    echo "# Skill root: ${SKILL_ROOT}"
+    echo "# Target: ${target}"
+    echo "# Public keys only (WECHAT_MP_*). Prefer this file over shell exports."
+    echo "WECHAT_MP_APPID=$(printf '%q' "$appid")"
+    echo "WECHAT_MP_SECRET=$(printf '%q' "$secret")"
+    echo "WECHAT_MP_AUTHOR=$(printf '%q' "$author")"
+    if [[ -n "$api_base" ]]; then
+      echo "WECHAT_MP_API_BASE=$(printf '%q' "$api_base")"
+    fi
+  } >"$out_file"
   chmod 600 "$out_file" 2>/dev/null || true
   echo "Wrote ${out_file}"
   if [[ "$target" == "local" ]]; then
@@ -327,13 +375,13 @@ EOF
 }
 
 cmd_init_style() {
-  local force=0 target="durable"
+  local force=0 target="kedoupi"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force) force=1; shift ;;
       --target) require_val "$1" "${2-}"; target="$2"; shift 2 ;;
       -h|--help)
-        echo "Usage: wechat-mp init-style [--target durable|global] [--force]"
+        echo "Usage: wechat-mp init-style [--target kedoupi|durable|global] [--force]"
         return 0
         ;;
       *) echo "Unknown option: $1" >&2; return 2 ;;
@@ -341,9 +389,10 @@ cmd_init_style() {
   done
   local out
   case "$target" in
+    kedoupi|default) out="$KEDOUPI_STYLE_FILE" ;;
     durable) out="$DURABLE_STYLE_FILE" ;;
     global) out="$GLOBAL_SHARED_STYLE_FILE" ;;
-    *) echo "Invalid --target (style: durable|global)" >&2; return 2 ;;
+    *) echo "Invalid --target (style: kedoupi|durable|global)" >&2; return 2 ;;
   esac
   if [[ -f "$out" && "$force" -ne 1 ]]; then
     echo "Style already exists: $out" >&2
@@ -938,7 +987,7 @@ cmd_which_config() {
     echo "  WECHAT_MP_SECRET=(unset)"
   fi
   echo "  WECHAT_MP_AUTHOR=${WECHAT_MP_AUTHOR:-"(unset)"}"
-  echo "  WECHAT_MP_API_BASE=${WECHAT_MP_API_BASE:-${KDP_WECHAT_PROXY:-"(default https://api.weixin.qq.com)"}}"
+  echo "  WECHAT_MP_API_BASE=${WECHAT_MP_API_BASE:-"(default https://api.weixin.qq.com)"}"
 }
 
 # ---------------------------------------------------------------------------

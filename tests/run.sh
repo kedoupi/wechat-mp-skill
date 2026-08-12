@@ -60,7 +60,7 @@ PASS=$((PASS + 1))
 
 echo "== version / help =="
 ver="$("$BIN" version)"
-assert_contains "version" "wechat-mp v0.1.3" "$ver"
+assert_contains "version" "wechat-mp v0.2.0" "$ver"
 "$BIN" --help >"$TMP/help"
 assert_contains "help draft" "draft" "$(cat "$TMP/help")"
 assert_contains "help dry-run" "dry-run" "$(cat "$TMP/help")"
@@ -245,6 +245,22 @@ echo "== api base / alias offline =="
 # list-local-images stays offline; _api_base only reads env
 base="$(WECHAT_MP_API_BASE=https://proxy.example python3 -c "import importlib.util; from pathlib import Path; p=Path('$API'); spec=importlib.util.spec_from_file_location('w', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m._api_base())")"
 assert_contains "api base env" "proxy.example" "$base"
+
+
+echo "== kedoupi config migrate =="
+# Isolate HOME so we never touch the developer machine layout in assertions
+FAKE_HOME="$TMP/fake-home"
+mkdir -p "$FAKE_HOME/.agents/skills/.skill-data/wechat-mp"
+printf '%s\n' 'WECHAT_MP_APPID=wxTESTAPPID123456' 'WECHAT_MP_SECRET=testsecretvalue12' >"$FAKE_HOME/.agents/skills/.skill-data/wechat-mp/config.env"
+chmod 600 "$FAKE_HOME/.agents/skills/.skill-data/wechat-mp/config.env"
+mig="$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
+assert_contains "migrate creates kedoupi path" ".config/kedoupi/wechat-mp/config.env" "$mig"
+assert_contains "migrate recommended exists" "[exists" "$mig"
+[[ -f "$FAKE_HOME/.config/kedoupi/wechat-mp/config.env" ]]
+echo "  PASS  kedoupi file on disk"
+PASS=$((PASS + 1))
+assert_contains "migrate appid masked" "WECHAT_MP_APPID=" "$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
+assert_not_contains "migrate no raw secret" "testsecretvalue12" "$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
 
 echo "== package layout =="
 for f in \

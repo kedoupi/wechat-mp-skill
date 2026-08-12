@@ -7,3 +7,6 @@ config.local.env
 node_modules/
 .skills/
 skills-lock.json
+
+# Local live experiments
+artifacts/live/_scratch/
