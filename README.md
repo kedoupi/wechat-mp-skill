@@ -8,14 +8,22 @@
 
 Part of the [kedoupi/skills](https://github.com/kedoupi/skills) suite: **standalone or combined**.
 
+Chinese guide: [README.zh-CN.md](./README.zh-CN.md)
+
+## What you can do (pick your level)
+
+| Level | Goal | Credentials? |
+| --- | --- | --- |
+| **A — Write** | Local `article.md` + quality flow | No |
+| **B — Package** | Article + cover (tzai-image) + `preview.html` | No appid; tzai key only if you generate images |
+| **C — Draft** | Push to WeChat **draft box** (not mass-send) | Yes: appid + secret |
+
 | Use case | Install |
 | --- | --- |
 | Write 公众号 article only | `wechat-mp-skill` |
 | Write + cover images | + [tzai-image-skill](https://github.com/kedoupi/tzai-image-skill) |
 | + Feishu notify | + [lark-push-skill](https://github.com/kedoupi/lark-push-skill) |
 | + WeChat draft box | `wechat-mp init` with appid/secret |
-
-Chinese guide: [README.zh-CN.md](./README.zh-CN.md)
 
 ## Install
 
@@ -25,24 +33,32 @@ npx skills add kedoupi/wechat-mp-skill
 npx skills add kedoupi/wechat-mp-skill -g --all
 ```
 
-Requires **python3** for preview / draft helpers. **No WeChat credentials** needed to write or preview.
+Requires **python3** for preview / draft helpers.
 
 ### After install (copy-paste)
 
-The skills CLI does not run package hooks — run these yourself (or ask your agent):
+`npx skills add` only installs code — **no secrets, no style**. Run:
 
 ```bash
 SK=~/.agents/skills/wechat-mp
 
-# Always safe: environment checklist (prints setup hints if draft config missing)
+# Always safe — checklist + setup hints
 bash $SK/scripts/wechat-mp doctor
 
-# Optional — only when you want WeChat draft/upload:
+# Optional account voice (no appid) → ~/.config/kedoupi/wechat-mp/style.yaml
+bash $SK/scripts/wechat-mp init-style
+
+# Optional — only when you want draft/upload:
 bash $SK/scripts/wechat-mp init \
   --appid 'wx_YOUR_APPID' \
   --secret 'YOUR_APPSECRET'
-# → ~/.config/kedoupi/wechat-mp/config.env
+# If official API is IP-blocked, also pass:
+#   --api-base 'https://YOUR_PROXY_HOST'
+# → ~/.config/kedoupi/wechat-mp/config.env  (chmod 600)
 ```
+
+**Do not** put secrets only inside `~/.agents/skills/wechat-mp/` (wiped by `npx skills update`).  
+**Do not** put app secrets in `~/.zshrc` for this skill — prefer `init`.
 
 ## Agent usage
 
@@ -52,22 +68,23 @@ Say things like:
 - 「完整制作一篇公众号」→ article + cover (if tzai-image present) + `preview.html` (mode B)
 - 「推到草稿箱」→ draft API after confirm (mode C)
 
-## CLI
+## First article (CLI)
+
+Run from your **content project root** so history stays in-repo under `./wechat-mp-out/`:
 
 ```bash
-SK=~/.agents/skills/wechat-mp   # or your install path
+SK=~/.agents/skills/wechat-mp
 
-# From your *content project* root (so history stays in-repo):
 bash $SK/scripts/wechat-mp doctor
-bash $SK/scripts/wechat-mp list-out       # prior articles in ./wechat-mp-out
-bash $SK/scripts/wechat-mp suite          # soft peers
 bash $SK/scripts/wechat-mp new-out --title "My topic"
+# edit ./wechat-mp-out/<slug>/article.md  (agent usually writes this)
 bash $SK/scripts/wechat-mp preview --dir ./wechat-mp-out/<slug>
-bash $SK/scripts/wechat-mp draft --dir ./wechat-mp-out/<slug> --dry-run
+bash $SK/scripts/wechat-mp list-out
 
-# Optional WeChat API credentials (draft only)
-bash $SK/scripts/wechat-mp init --appid wx… --secret …
-bash $SK/scripts/wechat-mp init-style     # account voice, no appid
+# Draft only after init + cover image:
+bash $SK/scripts/wechat-mp draft --dir ./wechat-mp-out/<slug> --dry-run
+# real push (needs confirm / credentials + cover):
+# bash $SK/scripts/wechat-mp draft --dir ./wechat-mp-out/<slug>
 ```
 
 ### Preview expectations
@@ -76,24 +93,65 @@ bash $SK/scripts/wechat-mp init-style     # account voice, no appid
 
 ### Safety
 
-- Default: local article only  
-- No mass-publish  
-- `--dry-run` never calls WeChat  
-- Cover required for real draft  
+| Action | Default |
+| --- | --- |
+| Local article | On |
+| Paid image gen | Off (needs tzai + explicit request) |
+| Feishu notify | Off |
+| WeChat draft | Off; **no mass-send** |
+| `--dry-run` | Never calls WeChat |
+
+## Configuration
+
+### Credentials (draft only)
+
+| Variable | Meaning |
+| --- | --- |
+| `WECHAT_MP_APPID` | Official Account appid |
+| `WECHAT_MP_SECRET` | App secret |
+| `WECHAT_MP_AUTHOR` | Optional default author on drafts |
+| `WECHAT_MP_API_BASE` | Optional API host (IP-whitelist proxy) |
+| `WECHAT_MP_CONFIG` | Optional explicit env file path |
+
+Recommended file (default for `init`):
+
+```text
+~/.config/kedoupi/wechat-mp/config.env
+```
+
+### Account voice (`style.yaml`)
+
+```bash
+bash ~/.agents/skills/wechat-mp/scripts/wechat-mp init-style
+# → ~/.config/kedoupi/wechat-mp/style.yaml
+```
+
+| Field | Purpose |
+| --- | --- |
+| `positioning` | One-line audience / account pitch |
+| `topics` | Topic boundaries |
+| `voice` | `clear-judgment` (default) · `warm-practical` · `sharp-brief` |
+| `taboo` | Hard “do not invent” rules |
+| `aigc_disclosure` | `ask` · `always` · `never` |
+
+Inspect:
+
+```bash
+bash ~/.agents/skills/wechat-mp/scripts/wechat-mp which-config
+bash ~/.agents/skills/wechat-mp/scripts/wechat-mp doctor
+```
 
 ## Output layout (per content project)
 
-`wechat-mp-out/` is **project-local writing history**: next time you open the same project, `list-out` and prior `brief.md` / `article.md` are available as continuity.
-
 ```text
 <your-project>/
-  wechat-mp-out/
+  wechat-mp-out/            # project-local history (list-out reads this)
     README.md
     <slug>/
-      manifest.json   # suite handoff + status
+      manifest.json         # suite handoff + status
       brief.md
       article.md
-      cover.png
+      cover.png             # required for real draft
       figures/
       preview.html
 ```

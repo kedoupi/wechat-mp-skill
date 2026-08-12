@@ -183,10 +183,16 @@ tokerr="$("$BIN" token --dry-run 2>&1)"
 assert_contains "token dry-run" "[dry-run]" "$tokerr"
 
 echo "== draft guards (offline, no network) =="
-# missing cover → exit 2 (non-dry-run)
-# Unset skill + suite alias env so local shell globals cannot satisfy creds
-_unset_creds=(env -u WECHAT_MP_APPID -u WECHAT_MP_SECRET -u WECHAT_MP_CONFIG \
-  -u KDP_WECHAT_APPID -u KDP_WECHAT_APPSECRET -u KDP_WECHAT_PROXY -u WECHAT_MP_API_BASE)
+# Isolate HOME so a developer machine ~/.config/kedoupi/wechat-mp cannot leak
+# creds into offline guards. On macOS env, flags (-u) must precede name=value.
+_EMPTY_HOME="$TMP/empty-home-draft"
+mkdir -p "$_EMPTY_HOME"
+_unset_creds=(
+  env
+  -u WECHAT_MP_APPID -u WECHAT_MP_SECRET -u WECHAT_MP_CONFIG
+  -u KDP_WECHAT_APPID -u KDP_WECHAT_APPSECRET -u KDP_WECHAT_PROXY -u WECHAT_MP_API_BASE
+  "HOME=$_EMPTY_HOME"
+)
 rm -f "$out_dir/cover.png"
 assert_exit "draft no cover" 2 "${_unset_creds[@]}" \
   "$BIN" draft --dir "$out_dir"
@@ -206,7 +212,11 @@ assert_contains "dash title path" "dash-title" "$dash_dir"
 assert_contains "dash title manifest" "leading dash" "$(cat "$dash_dir/manifest.json")"
 
 echo "== which-config masks secrets =="
+# Isolated HOME + explicit env only (no host kedoupi file overriding values)
+_WC_HOME="$TMP/empty-home-which-config"
+mkdir -p "$_WC_HOME"
 wc_out="$(
+  HOME="$_WC_HOME" \
   WECHAT_MP_APPID=wxabcdef12345678 WECHAT_MP_SECRET=supersecretvalue \
     "$BIN" which-config 2>&1
 )"

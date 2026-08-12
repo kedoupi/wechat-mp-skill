@@ -33,6 +33,9 @@ Offline fixture used by tests:
 
 - `tests/fixtures/sample.md` — short 公众号-style sample for `preview` / `md2html`
 
+End-user install + config lives in the root [README](../README.md) / [中文](../README.zh-CN.md)
+(`doctor` → optional `init-style` → optional `init` for draft).
+
 Manual golden path (after install):
 
 ```bash

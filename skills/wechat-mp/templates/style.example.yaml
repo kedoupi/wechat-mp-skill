@@ -1,6 +1,6 @@
 # Account voice for wechat-mp writing (no WeChat appid required).
 # Install: bash scripts/wechat-mp init-style
-# Durable path: <skills-parent>/.skill-data/wechat-mp/style.yaml
+# Recommended path (default): ~/.config/kedoupi/wechat-mp/style.yaml
 
 # One-line account positioning
 positioning: "写给关注 AI 工具与工程效率的技术读者"
