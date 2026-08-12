@@ -153,7 +153,8 @@ Commands:
   doctor              Environment + suite visibility checklist
   init                Write durable WeChat credentials (optional for writing)
   init-style          Copy style template to durable style.yaml
-  new-out             Create output dir + manifest.json
+  new-out             Create article dir under project ./wechat-mp-out
+  list-out            List prior articles in ./wechat-mp-out (project history)
   preview             Markdown → local WeChat-oriented HTML
   md2html             Convert MD to HTML (stdout or -o)
   draft               Push draft to WeChat (needs appid; use --dry-run offline)
@@ -166,6 +167,9 @@ Commands:
   version             Print version
 
 Writing quality flow lives in SKILL.md (Agent). This CLI is the deterministic layer.
+
+Project layout (run from the content project root):
+  ./wechat-mp-out/<slug>/   # article history lives with the project
 
 Safety:
   --dry-run on draft/upload/token never hits the network.
@@ -356,8 +360,102 @@ cmd_init_style() {
 }
 
 # ---------------------------------------------------------------------------
-# new-out + manifest
+# new-out + list-out + manifest
 # ---------------------------------------------------------------------------
+
+cmd_list_out() {
+  # Project history: scan ./wechat-mp-out (or --base) for prior article dirs
+  local base="./wechat-mp-out" json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base) require_val "$1" "${2-}"; base="$2"; shift 2 ;;
+      --json) json=1; shift ;;
+      -h|--help)
+        cat <<EOF
+Usage: wechat-mp list-out [--base <dir>] [--json]
+
+List prior articles under the project content base (default: ./wechat-mp-out).
+Use from the content project root so history stays with that project.
+EOF
+        return 0
+        ;;
+      *) echo "Unknown option: $1" >&2; return 2 ;;
+    esac
+  done
+
+  if [[ ! -d "$base" ]]; then
+    if [[ "$json" -eq 1 ]]; then
+      echo "[]"
+    else
+      echo "No history yet: $base (run new-out from this project to create one)"
+    fi
+    return 0
+  fi
+
+  require_python3
+  WECHAT_MP_LIST_BASE="$(cd -- "$base" && pwd -P)" WECHAT_MP_LIST_JSON="$json" python3 - <<'PY'
+import json, os
+from pathlib import Path
+
+base = Path(os.environ["WECHAT_MP_LIST_BASE"])
+as_json = os.environ.get("WECHAT_MP_LIST_JSON") == "1"
+rows = []
+for child in sorted(base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    if not child.is_dir() or child.name.startswith("."):
+        continue
+    mf = child / "manifest.json"
+    title, status, media = "", {}, None
+    if mf.is_file():
+        try:
+            data = json.loads(mf.read_text(encoding="utf-8"))
+            title = data.get("title") or ""
+            status = data.get("status") or {}
+            media = data.get("draft_media_id")
+        except json.JSONDecodeError:
+            title = "(invalid manifest)"
+    else:
+        # bare folder still counts as history material
+        title = "(no manifest)"
+    has_article = (child / "article.md").is_file()
+    has_brief = (child / "brief.md").is_file()
+    has_cover = (child / "cover.png").is_file()
+    rows.append(
+        {
+            "slug": child.name,
+            "path": str(child),
+            "title": title,
+            "status": status,
+            "draft_media_id": media,
+            "has_article": has_article,
+            "has_brief": has_brief,
+            "has_cover": has_cover,
+            "mtime": int(child.stat().st_mtime),
+        }
+    )
+
+if as_json:
+    print(json.dumps(rows, ensure_ascii=False, indent=2))
+else:
+    print(f"wechat-mp history  base={base}  count={len(rows)}")
+    if not rows:
+        print("(empty)")
+    for r in rows:
+        st = r.get("status") or {}
+        art = st.get("article", "?")
+        draft = st.get("draft", "?")
+        flags = []
+        if r["has_brief"]:
+            flags.append("brief")
+        if r["has_article"]:
+            flags.append("article")
+        if r["has_cover"]:
+            flags.append("cover")
+        flag_s = ",".join(flags) if flags else "-"
+        title = r["title"] or "(untitled)"
+        print(f"  {r['slug']}\tarticle={art}\tdraft={draft}\t[{flag_s}]\t{title}")
+        print(f"    {r['path']}")
+PY
+}
 
 cmd_new_out() {
   local slug="" title="" base="./wechat-mp-out"
@@ -370,8 +468,11 @@ cmd_new_out() {
         cat <<EOF
 Usage: wechat-mp new-out [--slug <slug>] [--title <title>] [--base <dir>]
 
-Create output directory with manifest.json for suite handoff.
-Default base: ./wechat-mp-out
+Create one article directory under the project content base.
+Default base: ./wechat-mp-out  (relative to current project CWD)
+
+Run from the content project root so history accumulates as:
+  <project>/wechat-mp-out/<slug>/{brief,article,cover,preview,manifest}
 EOF
         return 0
         ;;
@@ -391,6 +492,22 @@ EOF
 
   local dir="${base%/}/${slug}"
   mkdir -p "$dir/figures"
+  # One-time project hint so the base is obviously "history for this repo"
+  if [[ ! -f "${base%/}/README.md" ]]; then
+    mkdir -p "${base%/}"
+    cat >"${base%/}/README.md" <<'EOF'
+# wechat-mp-out
+
+Project-local WeChat Official Account **writing history**.
+
+Each subdirectory is one article (`slug/`) with `brief.md`, `article.md`,
+optional `cover.png` / `preview.html`, and `manifest.json`.
+
+- Create: `wechat-mp new-out --title "…"`
+- List:   `wechat-mp list-out`
+- Keep this folder with the content project (commit if you want continuity).
+EOF
+  fi
   local ver
   ver="$(skill_version)"
   # shellcheck disable=SC2016
@@ -842,6 +959,7 @@ main() {
     init) cmd_init "$@" ;;
     init-style) cmd_init_style "$@" ;;
     new-out) cmd_new_out "$@" ;;
+    list-out|history) cmd_list_out "$@" ;;
     manifest-set) cmd_manifest_set "$@" ;;
     preview) cmd_preview "$@" ;;
     md2html) cmd_md2html "$@" ;;

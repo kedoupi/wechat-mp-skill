@@ -40,7 +40,9 @@ Say things like:
 ```bash
 SK=~/.agents/skills/wechat-mp   # or your install path
 
+# From your *content project* root (so history stays in-repo):
 bash $SK/scripts/wechat-mp doctor
+bash $SK/scripts/wechat-mp list-out       # prior articles in ./wechat-mp-out
 bash $SK/scripts/wechat-mp suite          # soft peers
 bash $SK/scripts/wechat-mp new-out --title "My topic"
 bash $SK/scripts/wechat-mp preview --dir ./wechat-mp-out/<slug>
@@ -62,16 +64,21 @@ bash $SK/scripts/wechat-mp init-style     # account voice, no appid
 - `--dry-run` never calls WeChat  
 - Cover required for real draft  
 
-## Output layout
+## Output layout (per content project)
+
+`wechat-mp-out/` is **project-local writing history**: next time you open the same project, `list-out` and prior `brief.md` / `article.md` are available as continuity.
 
 ```text
-wechat-mp-out/<slug>/
-  manifest.json   # handoff for suite composition
-  brief.md
-  article.md
-  cover.png
-  figures/
-  preview.html
+<your-project>/
+  wechat-mp-out/
+    README.md
+    <slug>/
+      manifest.json   # suite handoff + status
+      brief.md
+      article.md
+      cover.png
+      figures/
+      preview.html
 ```
 
 ## Related kedoupi skills

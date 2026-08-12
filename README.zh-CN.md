@@ -38,8 +38,11 @@ npx skills add kedoupi/wechat-mp-skill -g --all
 
 ## CLI 摘要
 
+在**内容项目根目录**执行，产物会落在该项目的 `./wechat-mp-out/`，下次写作可当作历史资料：
+
 ```bash
 bash ~/.agents/skills/wechat-mp/scripts/wechat-mp doctor
+bash ~/.agents/skills/wechat-mp/scripts/wechat-mp list-out    # 本项目历史成稿
 bash ~/.agents/skills/wechat-mp/scripts/wechat-mp new-out --title "选题"
 bash ~/.agents/skills/wechat-mp/scripts/wechat-mp preview --dir ./wechat-mp-out/<slug>
 bash ~/.agents/skills/wechat-mp/scripts/wechat-mp draft --dir ./wechat-mp-out/<slug> --dry-run

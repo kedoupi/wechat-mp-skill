@@ -10,7 +10,7 @@ description: >
   chat messages (use lark-push), Xiaohongshu posts, generic blogs without 公众号 intent.
 metadata:
   author: kedoupi
-  version: "0.1.2"
+  version: "0.1.3"
   requires:
     bins: ["python3"]
 ---
@@ -80,17 +80,27 @@ bash <skill-dir>/scripts/wechat-mp init-style
 
 ### A — 写一篇（default）
 
-1. Read `templates/style.example.yaml` path or durable style if present.  
-2. `wechat-mp new-out --title "…" --base ./wechat-mp-out` → `$OUT`  
-   Use a **content workspace** CWD (or explicit `--base` under the user's writing project).  
-   Do **not** create `wechat-mp-out` inside the `kedoupi/skills` incubator monorepo root.  
-3. Read and apply:
+**Output home = the content project**, not the skill install path and not the
+`kedoupi/skills` incubator monorepo.
+
+```text
+<your-project>/                 # cd here (user's writing / product repo)
+  wechat-mp-out/                # project-local history (commit if you want)
+    <slug-a>/ brief.md article.md …
+    <slug-b>/ …
+```
+
+1. **CWD** = the project the user is writing in (or pass `--base <project>/wechat-mp-out`).  
+2. `wechat-mp list-out` — load prior titles/briefs as **history** (tone, repeated topics, avoid duplicate angles).  
+3. Read durable / example style if present.  
+4. `wechat-mp new-out --title "…"` → `$OUT` under `./wechat-mp-out/<slug>` (default `--base ./wechat-mp-out`).  
+5. Read and apply:
    - `references/article-brief.md` → write `$OUT/brief.md`
    - `references/frameworks.md` → pick one framework
-4. Draft body → self-review with `references/editorial-review.md`  
-5. Only on **pass**: write `$OUT/article.md`  
-6. `manifest-set --dir "$OUT" --status article=done --title "…"`  
-7. Deliver paths. **Stop** unless user asked for images/draft/notify.
+6. Draft body → self-review with `references/editorial-review.md`  
+7. Only on **pass**: write `$OUT/article.md`  
+8. `manifest-set --dir "$OUT" --status article=done --title "…"`  
+9. Deliver paths. **Stop** unless user asked for images/draft/notify.
 
 Typical length: ~1200–2500 Chinese characters unless brief says otherwise.
 
@@ -125,24 +135,27 @@ If user asked and lark-push is available, send a short notice with title + `$OUT
 ## CLI quick ref
 
 ```bash
+# from the content project root:
 bash <skill-dir>/scripts/wechat-mp doctor
-bash <skill-dir>/scripts/wechat-mp suite
+bash <skill-dir>/scripts/wechat-mp list-out          # project history
 bash <skill-dir>/scripts/wechat-mp new-out --title "主题"
 bash <skill-dir>/scripts/wechat-mp preview --dir ./wechat-mp-out/<slug>
 bash <skill-dir>/scripts/wechat-mp draft --dir ./wechat-mp-out/<slug> --dry-run
 bash <skill-dir>/scripts/wechat-mp --help
 ```
 
-## Output contract
+## Output contract (per content project)
 
 ```text
-wechat-mp-out/<slug>/
-  manifest.json    # suite handoff
-  brief.md
-  article.md
-  cover.png
-  figures/
-  preview.html
+<project>/wechat-mp-out/          # history root (stays with the project)
+  README.md                       # auto-created once
+  <slug>/
+    manifest.json                 # suite handoff + status
+    brief.md
+    article.md
+    cover.png
+    figures/
+    preview.html
 ```
 
 ## Troubleshooting

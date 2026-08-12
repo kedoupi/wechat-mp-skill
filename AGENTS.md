@@ -33,7 +33,7 @@ tests/run.sh
 - CLI option values may start with `-`  
 - No secrets in the package; no mass-publish APIs  
 - Bump version on behavior change  
-- **Article outputs** (`wechat-mp-out/`, previews, covers) are **user content**, not package or incubator tree. Default `--base ./wechat-mp-out` is relative to the **writer's CWD** (a content project). Never write run outputs into `kedoupi/skills` monorepo root or into `skills/wechat-mp/` package paths.  
+- **Article outputs** live under the **content project**: `<project>/wechat-mp-out/<slug>/`. That folder is intentional history for the next session (`list-out`). Default `--base ./wechat-mp-out` is CWD-relative — agents must `cd` to (or pass) the user's project, **not** the skill install path and **not** `kedoupi/skills` incubator root.  
 
 ## Suite discipline
 

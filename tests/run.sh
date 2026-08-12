@@ -60,7 +60,7 @@ PASS=$((PASS + 1))
 
 echo "== version / help =="
 ver="$("$BIN" version)"
-assert_contains "version" "wechat-mp v0.1.2" "$ver"
+assert_contains "version" "wechat-mp v0.1.3" "$ver"
 "$BIN" --help >"$TMP/help"
 assert_contains "help draft" "draft" "$(cat "$TMP/help")"
 assert_contains "help dry-run" "dry-run" "$(cat "$TMP/help")"
@@ -220,6 +220,25 @@ suite="$("$BIN" suite 2>&1)"
 assert_contains "suite header" "suite visibility" "$suite"
 assert_contains "suite tzai line" "tzai-image" "$suite"
 assert_contains "suite lark line" "lark-push" "$suite"
+
+echo "== list-out project history =="
+# empty base
+empty_list="$("$BIN" list-out --base "$TMP/empty-history" 2>&1)"
+assert_contains "list-out empty" "No history yet" "$empty_list"
+# after new-out, history lists the slug
+hist_base="$TMP/proj/wechat-mp-out"
+mkdir -p "$TMP/proj"
+h1="$("$BIN" new-out --base "$hist_base" --title "History One" --slug history-one)"
+h2="$("$BIN" new-out --base "$hist_base" --title "History Two" --slug history-two)"
+[[ -f "$hist_base/README.md" ]]
+echo "  PASS  history base README"
+PASS=$((PASS + 1))
+listed="$("$BIN" list-out --base "$hist_base" 2>&1)"
+assert_contains "list-out count" "count=2" "$listed"
+assert_contains "list-out slug" "history-one" "$listed"
+assert_contains "list-out title" "History Two" "$listed"
+jlist="$("$BIN" list-out --base "$hist_base" --json)"
+assert_contains "list-out json slug" "history-two" "$jlist"
 
 
 echo "== api base / alias offline =="
