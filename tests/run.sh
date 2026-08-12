@@ -60,7 +60,7 @@ PASS=$((PASS + 1))
 
 echo "== version / help =="
 ver="$("$BIN" version)"
-assert_contains "version" "wechat-mp v0.2.0" "$ver"
+assert_contains "version" "wechat-mp v0.2.1" "$ver"
 "$BIN" --help >"$TMP/help"
 assert_contains "help draft" "draft" "$(cat "$TMP/help")"
 assert_contains "help dry-run" "dry-run" "$(cat "$TMP/help")"
@@ -261,6 +261,14 @@ echo "  PASS  kedoupi file on disk"
 PASS=$((PASS + 1))
 assert_contains "migrate appid masked" "WECHAT_MP_APPID=" "$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
 assert_not_contains "migrate no raw secret" "testsecretvalue12" "$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
+
+
+echo "== doctor setup hints =="
+FAKE_HOME2="$TMP/fake-home-doctor"
+mkdir -p "$FAKE_HOME2"
+doc="$(HOME="$FAKE_HOME2" "$BIN" doctor 2>&1)"
+assert_contains "doctor setup header" "After install" "$doc"
+assert_contains "doctor setup init cmd" "wechat-mp init" "$doc"
 
 echo "== package layout =="
 for f in \

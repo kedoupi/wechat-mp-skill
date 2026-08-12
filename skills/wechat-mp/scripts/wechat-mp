@@ -287,10 +287,36 @@ cmd_doctor() {
   echo
   if [[ "$fail" -gt 0 ]]; then
     echo "Result: FAIL ($fail required, $warn warnings)"
+    print_setup_hints
     return 1
   fi
   echo "Result: OK ($warn warnings) — writing works without WeChat credentials"
+  print_setup_hints
   return 0
+}
+
+# Copy-paste block for humans after install / when config is missing.
+print_setup_hints() {
+  load_all_configs
+  if [[ -n "${WECHAT_MP_APPID:-}" && -n "${WECHAT_MP_SECRET:-}" && -f "$KEDOUPI_CONFIG_FILE" ]]; then
+    return 0
+  fi
+  cat <<EOF
+
+== After install / missing draft config (optional) ==
+Writing + local preview need NO appid. Configure only when you want draft/upload:
+
+  bash ${SCRIPT_DIR}/wechat-mp init \\
+    --appid 'wx_YOUR_APPID' \\
+    --secret 'YOUR_APPSECRET'
+  # If WeChat IP whitelist blocks you, also pass:
+  #   --api-base 'https://YOUR_PROXY_HOST'
+
+Writes: ~/.config/kedoupi/wechat-mp/config.env  (chmod 600)
+Optional voice (no appid):  bash ${SCRIPT_DIR}/wechat-mp init-style
+
+Then:  bash ${SCRIPT_DIR}/wechat-mp doctor
+EOF
 }
 
 # ---------------------------------------------------------------------------

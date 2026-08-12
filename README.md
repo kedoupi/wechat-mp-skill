@@ -27,6 +27,23 @@ npx skills add kedoupi/wechat-mp-skill -g --all
 
 Requires **python3** for preview / draft helpers. **No WeChat credentials** needed to write or preview.
 
+### After install (copy-paste)
+
+The skills CLI does not run package hooks — run these yourself (or ask your agent):
+
+```bash
+SK=~/.agents/skills/wechat-mp
+
+# Always safe: environment checklist (prints setup hints if draft config missing)
+bash $SK/scripts/wechat-mp doctor
+
+# Optional — only when you want WeChat draft/upload:
+bash $SK/scripts/wechat-mp init \
+  --appid 'wx_YOUR_APPID' \
+  --secret 'YOUR_APPSECRET'
+# → ~/.config/kedoupi/wechat-mp/config.env
+```
+
 ## Agent usage
 
 Say things like:

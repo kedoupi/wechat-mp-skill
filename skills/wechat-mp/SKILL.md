@@ -10,7 +10,7 @@ description: >
   chat messages (use lark-push), Xiaohongshu posts, generic blogs without 公众号 intent.
 metadata:
   author: kedoupi
-  version: "0.2.0"
+  version: "0.2.1"
   requires:
     bins: ["python3"]
 ---
@@ -47,13 +47,34 @@ bash <skill-dir>/scripts/wechat-mp doctor
 | **tzai-image** (optional) | generated cover |
 | **lark-push** (optional) | completion notify |
 
-```bash
-# Optional WeChat API (draft)
-bash <skill-dir>/scripts/wechat-mp init --appid wx… --secret …
+## Onboarding (install ≠ configure)
 
-# Optional account voice (no appid)
-bash <skill-dir>/scripts/wechat-mp init-style
+**Do not** ask for `appid`/`secret` just because the skill was installed or the
+user said “写一篇公众号”. Mode A (local article) works with zero WeChat config.
+
+| When | Agent action |
+| --- | --- |
+| Write / preview only | Proceed; no secrets |
+| User wants **draft box** and config missing | Explain why + paste `init` block below; offer dry-run / local-only degrade |
+| User wants cover / notify | Soft-detect peers; if missing keys there, use those skills’ `init` hints |
+| User asks “装好了吗 / doctor” | Run `doctor` (prints copy-paste setup when draft config missing) |
+
+Copy-paste (writes `~/.config/kedoupi/wechat-mp/config.env` — **not** shell rc):
+
+```bash
+bash <skill-dir>/scripts/wechat-mp init \
+  --appid 'wx_YOUR_APPID' \
+  --secret 'YOUR_APPSECRET'
+# optional IP-whitelist proxy:
+#   --api-base 'https://YOUR_PROXY_HOST'
+
+bash <skill-dir>/scripts/wechat-mp init-style   # optional account voice
+bash <skill-dir>/scripts/wechat-mp doctor
 ```
+
+If the user pastes appid/secret in chat, generate the same `init` command (or run
+it with their approval). Never invent credentials; never put secrets only inside
+the skill package.
 
 ## Locating the helper
 
