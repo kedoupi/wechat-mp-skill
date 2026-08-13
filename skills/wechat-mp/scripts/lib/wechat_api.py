@@ -44,7 +44,7 @@ TIMEOUT = 30
 _TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 
 _IMG_SRC_RE = re.compile(
-    r'(<img\b[^>]*?\bsrc=")([^"]+)(")',
+    r"""(<img\b[^>]*?\bsrc=(["']))([^"']+)(\2)""",
     re.IGNORECASE,
 )
 
@@ -190,18 +190,33 @@ def _is_remote_url(src: str) -> bool:
     )
 
 
+def _resolve_local_image(src: str, base: Path) -> Path:
+    """Resolve a local image path and require it to stay under base_dir."""
+    p = Path(src)
+    if not p.is_absolute():
+        p = (base / p).resolve()
+    else:
+        p = p.resolve()
+    try:
+        p.relative_to(base.resolve())
+    except ValueError as exc:
+        raise ValueError(f"body image escapes base dir: {src}") from exc
+    return p
+
+
 def list_local_image_srcs(html: str, base_dir: str | Path | None = None) -> list[str]:
     """Return local image paths referenced by <img src=…> (resolved when possible)."""
     base = Path(base_dir) if base_dir else Path.cwd()
     found: list[str] = []
     seen: set[str] = set()
     for m in _IMG_SRC_RE.finditer(html):
-        src = html_lib.unescape(m.group(2).strip())
+        src = html_lib.unescape(m.group(3).strip())
         if not src or _is_remote_url(src):
             continue
-        p = Path(src)
-        if not p.is_absolute():
-            p = (base / p).resolve()
+        try:
+            p = _resolve_local_image(src, base)
+        except ValueError:
+            continue
         key = str(p)
         if key in seen:
             continue
@@ -221,19 +236,18 @@ def rewrite_local_images(
     Returns (new_html, [(local_path, cdn_url), ...]).
     Missing local files raise FileNotFoundError.
     Remote / data: urls are left unchanged.
+    Paths must resolve under base_dir (no .. escape).
     """
     base = Path(base_dir) if base_dir else Path.cwd()
     cache: dict[str, str] = {}  # resolved local path → cdn
     mappings: list[tuple[str, str]] = []
 
     def repl(m: re.Match[str]) -> str:
-        prefix, src_raw, suffix = m.group(1), m.group(2), m.group(3)
+        prefix, _quote, src_raw, suffix = m.group(1), m.group(2), m.group(3), m.group(4)
         src = html_lib.unescape(src_raw.strip())
         if not src or _is_remote_url(src):
             return m.group(0)
-        p = Path(src)
-        if not p.is_absolute():
-            p = (base / p).resolve()
+        p = _resolve_local_image(src, base)
         key = str(p)
         if key not in cache:
             if not p.is_file():

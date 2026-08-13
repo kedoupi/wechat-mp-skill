@@ -60,7 +60,7 @@ PASS=$((PASS + 1))
 
 echo "== version / help =="
 ver="$("$BIN" version)"
-assert_contains "version" "wechat-mp v0.2.1" "$ver"
+assert_contains "version" "wechat-mp v0.3.0" "$ver"
 "$BIN" --help >"$TMP/help"
 assert_contains "help draft" "draft" "$(cat "$TMP/help")"
 assert_contains "help dry-run" "dry-run" "$(cat "$TMP/help")"
@@ -263,14 +263,55 @@ FAKE_HOME="$TMP/fake-home"
 mkdir -p "$FAKE_HOME/.agents/skills/.skill-data/wechat-mp"
 printf '%s\n' 'WECHAT_MP_APPID=wxTESTAPPID123456' 'WECHAT_MP_SECRET=testsecretvalue12' >"$FAKE_HOME/.agents/skills/.skill-data/wechat-mp/config.env"
 chmod 600 "$FAKE_HOME/.agents/skills/.skill-data/wechat-mp/config.env"
-mig="$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
+# migrate runs on doctor (not which-config / dry-run)
+mig="$(HOME="$FAKE_HOME" "$BIN" doctor 2>&1)"
 assert_contains "migrate creates kedoupi path" ".config/kedoupi/wechat-mp/config.env" "$mig"
-assert_contains "migrate recommended exists" "[exists" "$mig"
 [[ -f "$FAKE_HOME/.config/kedoupi/wechat-mp/config.env" ]]
 echo "  PASS  kedoupi file on disk"
 PASS=$((PASS + 1))
 assert_contains "migrate appid masked" "WECHAT_MP_APPID=" "$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
 assert_not_contains "migrate no raw secret" "testsecretvalue12" "$(HOME="$FAKE_HOME" "$BIN" which-config 2>&1)"
+
+echo "== env wins over config file =="
+env_cfg="$TMP/env-win.env"
+printf '%s\n' 'WECHAT_MP_APPID=wxFILEAAA1111111' 'WECHAT_MP_SECRET=filesecretvalue12' >"$env_cfg"
+chmod 600 "$env_cfg"
+env_wc="$(WECHAT_MP_APPID=wxPROCBBB2222222 WECHAT_MP_SECRET=procsecretvalue12 \
+  WECHAT_MP_CONFIG="$env_cfg" "$BIN" which-config 2>&1)"
+assert_contains "env appid masked" "wxPR…2222" "$env_wc"
+assert_not_contains "file appid not used" "wxFI" "$env_wc"
+
+echo "== digest byte limit + attr escape =="
+set +e
+digest_out="$(
+python3 - "$MD2HTML" <<'PY'
+import re
+import runpy
+import sys
+
+m = runpy.run_path(sys.argv[1])
+convert = m["convert"]
+zh = "# t\n\n" + ("中文摘要测试" * 40)
+r = convert(zh)
+assert len(r.digest.encode("utf-8")) <= 120, len(r.digest.encode("utf-8"))
+evil = '![x](x" onerror="alert(1)")'
+r2 = convert("# e\n\n" + evil)
+# Quotes must be entity-escaped inside src= so onerror cannot become a real attribute.
+assert "&quot;" in r2.html
+assert not re.search(r"<img\\b[^>]*\\bonerror\\s*=", r2.html, re.I)
+print("ok")
+PY
+)"
+digest_rc=$?
+set -e
+if [[ "$digest_rc" -eq 0 && "$digest_out" == *ok* ]]; then
+  echo "  PASS  digest/attr python checks"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  digest/attr python checks (rc=$digest_rc)"
+  echo "        $digest_out"
+  FAIL=$((FAIL + 1))
+fi
 
 
 echo "== doctor setup hints =="

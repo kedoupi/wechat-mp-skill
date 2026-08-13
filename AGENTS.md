@@ -62,4 +62,4 @@ bash skills/wechat-mp/scripts/wechat-mp doctor
 
 ## Incubator
 
-When this repo is a submodule of `kedoupi/skills`, also follow parent `AGENTS.md` and update the parent **README catalog** on version/public changes.
+When this repo is a submodule of `kedoupi/skills`, also follow parent `AGENTS.md`. On version or public-product changes, update parent `products.json` if purpose/entrypoints changed, then run `bash scripts/render-catalog` and `bash scripts/check-catalog` from the incubator root. Do not hand-edit the generated README/AGENTS tables.

@@ -5,7 +5,7 @@ Thanks for your interest in improving `wechat-mp`.
 ## Development setup
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/kedoupi/wechat-mp-skill.git
 cd wechat-mp-skill
 npx skills add ./ --list
 bash tests/run.sh
@@ -25,5 +25,6 @@ bash tests/run.sh
 ```bash
 bash tests/run.sh
 bash skills/wechat-mp/scripts/wechat-mp --help
-bash skills/wechat-mp/scripts/wechat-mp --dry-run --title "Test" --body "- hello"
+bash skills/wechat-mp/scripts/wechat-mp doctor
+bash skills/wechat-mp/scripts/wechat-mp new-out --title "Test" --base /tmp/wechat-mp-out
 ```

@@ -45,6 +45,24 @@ class ConvertResult:
     images: list[str] = field(default_factory=list)
 
 
+def _truncate_utf8(text: str, max_bytes: int) -> str:
+    """Truncate to at most max_bytes UTF-8 bytes without splitting a code point."""
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    raw = raw[:max_bytes]
+    while raw:
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raw = raw[:-1]
+    return ""
+
+
+def _safe_attr(value: str) -> str:
+    return html.escape(html.unescape(value), quote=True)
+
+
 def _inline(text: str, styles: dict[str, str], footnotes: list[tuple[str, str]]) -> str:
     """Apply inline markdown: images, links, code, bold, italic."""
     # Escape first, then restore intentional markup via placeholders
@@ -61,9 +79,13 @@ def _inline(text: str, styles: dict[str, str], footnotes: list[tuple[str, str]])
 
     def img_sub(m: re.Match[str]) -> str:
         alt, src = m.group(1), m.group(2)
-        images_found.append(html.unescape(src))
+        src_raw = html.unescape(src).strip()
+        if re.match(r"(?i)^\s*javascript:", src_raw):
+            return ""
+        images_found.append(src_raw)
         return (
-            f'<img src="{src}" alt="{alt}" style="{styles["img"]}" />'
+            f'<img src="{_safe_attr(src_raw)}" alt="{_safe_attr(html.unescape(alt))}" '
+            f'style="{styles["img"]}" />'
         )
 
     text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", img_sub, text)
@@ -244,13 +266,13 @@ def convert(markdown_text: str, styles: dict[str, str] | None = None) -> Convert
         )
 
     body = "\n".join(out)
-    # digest: plain text first ~60 chars (WeChat digest soft limit ~120 bytes)
+    # digest: WeChat soft limit ~120 UTF-8 bytes (not characters)
     plain = re.sub(r"<[^>]+>", "", body)
     plain = html.unescape(plain)
     plain = re.sub(r"\s+", " ", plain).strip()
     if not title:
-        title = plain[:30] if plain else "Untitled"
-    digest = plain[:80] if plain else ""
+        title = _truncate_utf8(plain, 90) if plain else "Untitled"
+    digest = _truncate_utf8(plain, 120) if plain else ""
 
     # de-dupe images preserving order
     seen: set[str] = set()
