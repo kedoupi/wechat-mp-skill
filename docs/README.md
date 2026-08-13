@@ -6,12 +6,10 @@ Human-facing docs for **wechat-mp-skill**. Not part of the installable package.
 
 ```text
 docs/
-├── README.md
-└── demo/
-    └── README.md     # how to run a local golden-path demo
+└── README.md         # this index + golden-path notes
 ```
 
-Gallery screenshots are optional; this skill’s main demos are **user project outputs** under
+No curated `screenshots/` yet. End-user demos are **user project outputs** under
 `<project>/wechat-mp-out/` (not under the skill package).
 
 ## Separation (incubator contract)
